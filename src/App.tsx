@@ -33,6 +33,7 @@ type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[] }
 
 const unitScale: Record<Unit, number> = { ft: 12, in: 1, cm: 1 / 2.54, mm: 1 / 25.4 }
 const unitNames: Record<Unit, string> = { ft: 'ft', in: 'in', cm: 'cm', mm: 'mm' }
+const defaultUnit: Unit = 'cm'
 const storageKey = 'area-planner-projects-v1'
 const squareFeetInSquareMetre = 10.7639104167
 
@@ -356,7 +357,7 @@ function calculateTileEstimate(area: Area, tileSet: TileSet) {
 }
 
 function App() {
-  const [unit, setUnit] = useState<Unit>('ft')
+  const [unit, setUnit] = useState<Unit>(defaultUnit)
   const [activeView, setActiveView] = useState<'tiles' | 'paint' | 'formulas'>('tiles')
   const [showTileComputation, setShowTileComputation] = useState(true)
   const [showPaintComputation, setShowPaintComputation] = useState(true)
@@ -372,8 +373,8 @@ function App() {
   const [selectedId, setSelectedId] = useState(1)
   const [attachSide, setAttachSide] = useState<Side>('east')
   const [alignment, setAlignment] = useState<Alignment>('start')
-  const [newWidth, setNewWidth] = useState(6)
-  const [newHeight, setNewHeight] = useState(4)
+  const [newWidth, setNewWidth] = useState(() => Number(fromInches(toInches(6, 'ft'), defaultUnit).toFixed(2)))
+  const [newHeight, setNewHeight] = useState(() => Number(fromInches(toInches(4, 'ft'), defaultUnit).toFixed(2)))
   const [notice, setNotice] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
 
