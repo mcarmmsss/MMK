@@ -216,6 +216,20 @@
 .paint-plan-preview p { margin: 8px 0 0; color: var(--quiet); font-size: 10px; line-height: 1.5; }
 .paint-area-picker { display: grid; gap: 5px; color: var(--quiet); font-size: 10px; }
 .paint-area-picker select, .area-input-pair select { min-height: 34px; padding: 0 9px; border: 1px solid #41423b; color: var(--paper); background: #1c1d1a; font-size: 11px; }
+.paint-products-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0 10px; }
+.paint-products-heading > div { display: grid; gap: 4px; }
+.paint-products-heading small, .paint-product-choice small { color: var(--quiet); font-size: 9px; }
+.paint-product-list { display: grid; gap: 6px; }
+.paint-product-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #353630; background: #1d1e1b; }
+.paint-product-item.is-selected { border-color: #786047; }
+.paint-product-choice { display: grid; flex: 1; gap: 4px; min-width: 0; padding: 9px 11px; border: 0; color: var(--paper); background: transparent; text-align: left; cursor: pointer; }
+.paint-product-choice strong { overflow: hidden; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.paint-product-item > .remove-subsection { margin-right: 7px; }
+.paint-product-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 340px; margin-top: 13px; }
+.paint-product-fields .paint-field { min-width: 0; margin: 0; }
+.paint-surface-picker { margin: 15px 0; }
+.paint-final-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.paint-summary-color { margin: 5px 0 0; color: var(--quiet); font-size: 10px; }
 .paint-field-group { display: grid; gap: 7px; }
 .field-caption, .paint-field > span:first-child, .opening-row label > span:first-child { color: var(--quiet); font-size: 10px; }
 .source-toggle { width: fit-content; }
@@ -281,6 +295,7 @@
 .calculator-result-row > span { color: var(--quiet); font-family: var(--mono); font-size: 9px; }
 .calculator-display output { max-width: 210px; overflow: hidden; color: var(--paper); font-family: var(--mono); font-size: 26px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
 .calculator-display.has-error output { color: #e1a18c; font-size: 20px; }
+@media (max-width: 680px) { .paint-final-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .calculator-keypad { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(5, minmax(42px, 1fr)); gap: 7px; }
 .calculator-key { min-width: 0; border: 1px solid #41423b; color: var(--paper); background: #2c2d29; font-family: var(--mono); font-size: 15px; cursor: pointer; transition: background 120ms ease, border-color 120ms ease; }
 .calculator-key:hover { border-color: #777366; background: #373832; }
