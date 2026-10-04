@@ -30,6 +30,7 @@ type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: Bon
 type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number }
 type Area = { id: number; name: string; tileSetId: string; sections: Rect[]; paint: PaintSettings; tileCalculation: TileCalculation }
 type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[] }
+type ProjectBackup = { format: 'mmk-project-backup'; version: 1; projects: Project[] }
 
 const unitScale: Record<Unit, number> = { ft: 12, in: 1, cm: 1 / 2.54, mm: 1 / 25.4 }
 const unitNames: Record<Unit, string> = { ft: 'ft', in: 'in', cm: 'cm', mm: 'mm' }
@@ -56,6 +57,66 @@ function createTileCalculation(): TileCalculation {
 function createProject(name = 'Untitled project'): Project {
   const tileSet = createTileSet()
   return { id: createId(), name, areas: [{ id: 1, name: 'Area 1', tileSetId: tileSet.id, sections: [{ id: 1, x: 0, y: 0, width: 400 / 2.54, height: 300 / 2.54 }], paint: createPaintSettings(), tileCalculation: createTileCalculation() }], tileSets: [tileSet] }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isProjectBackup(value: unknown): value is ProjectBackup {
+  if (!isRecord(value) || value.format !== 'mmk-project-backup' || value.version !== 1 || !Array.isArray(value.projects) || value.projects.length === 0) return false
+  return value.projects.every((project) => {
+    if (!isRecord(project) || typeof project.id !== 'string' || typeof project.name !== 'string' || !Array.isArray(project.areas) || !project.areas.length || !Array.isArray(project.tileSets) || !project.tileSets.length) return false
+    const tileSetIds = project.tileSets.map((tileSet) => isRecord(tileSet) && typeof tileSet.id === 'string' ? tileSet.id : '')
+    if (tileSetIds.some((id) => !id) || new Set(tileSetIds).size !== tileSetIds.length) return false
+    const validTileSets = project.tileSets.every((tileSet) => isRecord(tileSet) &&
+      typeof tileSet.name === 'string' && isFiniteNumber(tileSet.width) && tileSet.width > 0 && isFiniteNumber(tileSet.height) && tileSet.height > 0 &&
+      typeof tileSet.rotated === 'boolean' && typeof tileSet.wasteOn === 'boolean' && isFiniteNumber(tileSet.wastePercent) &&
+      typeof tileSet.priceOpen === 'boolean' && (tileSet.priceMode === 'tile' || tileSet.priceMode === 'box') &&
+      isFiniteNumber(tileSet.unitPrice) && isFiniteNumber(tileSet.tilesPerBox) && tileSet.tilesPerBox > 0)
+    if (!validTileSets) return false
+    return project.areas.every((area) => {
+      if (!isRecord(area) || !isFiniteNumber(area.id) || typeof area.name !== 'string' || typeof area.tileSetId !== 'string' || !tileSetIds.includes(area.tileSetId) || !Array.isArray(area.sections) || !area.sections.length) return false
+      const validSections = area.sections.every((section) => isRecord(section) && isFiniteNumber(section.id) && isFiniteNumber(section.x) && isFiniteNumber(section.y) && isFiniteNumber(section.width) && section.width > 0 && isFiniteNumber(section.height) && section.height > 0)
+      if (!validSections || !isRecord(area.paint) || !isRecord(area.tileCalculation)) return false
+      const paint = area.paint
+      const validPaint = (paint.source === 'outline' || paint.source === 'manual') && isFiniteNumber(paint.manualArea) &&
+        (paint.manualUnit === 'm2' || paint.manualUnit === 'ft2') && isFiniteNumber(paint.wallHeight) && Array.isArray(paint.openings) &&
+        paint.openings.every((opening) => isRecord(opening) && isFiniteNumber(opening.id) && isFiniteNumber(opening.count) && isFiniteNumber(opening.width) && isFiniteNumber(opening.height)) &&
+        isFiniteNumber(paint.openingArea) && (paint.openingAreaUnit === 'm2' || paint.openingAreaUnit === 'ft2') &&
+        isFiniteNumber(paint.coats) && (paint.volume === 'litres' || paint.volume === 'gallons') && isFiniteNumber(paint.unitPrice)
+      const calculation = area.tileCalculation
+      const validCalculation = (calculation.mode === 'layout' || calculation.mode === 'simple') &&
+        (calculation.layout === 'straight' || calculation.layout === 'running-bond' || calculation.layout === 'diagonal' || calculation.layout === 'herringbone') &&
+        (calculation.bondOffsetMode === 'half' || calculation.bondOffsetMode === 'third' || calculation.bondOffsetMode === 'custom') && isFiniteNumber(calculation.customBondOffset)
+      return validPaint && validCalculation
+    })
+  })
+}
+
+function prepareImportedProject(project: Project): Project {
+  const tileSetIds = new Map(project.tileSets.map((tileSet) => [tileSet.id, createId()]))
+  return {
+    ...project,
+    id: createId(),
+    tileSets: project.tileSets.map((tileSet) => ({ ...tileSet, id: tileSetIds.get(tileSet.id)! })),
+    areas: project.areas.map((area, areaIndex) => ({
+      ...area,
+      id: areaIndex + 1,
+      tileSetId: tileSetIds.get(area.tileSetId)!,
+      sections: area.sections.map((section, sectionIndex) => ({ ...section, id: sectionIndex + 1 })),
+      paint: {
+        ...createPaintSettings(),
+        ...area.paint,
+        openings: area.paint.openings.map((opening, openingIndex) => ({ ...opening, id: openingIndex + 1 })),
+      },
+      tileCalculation: { ...createTileCalculation(), ...area.tileCalculation },
+    })),
+  }
 }
 
 type NumericInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> & {
@@ -404,6 +465,7 @@ function App() {
   const [newHeight, setNewHeight] = useState(120)
   const [notice, setNotice] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(projects))
@@ -517,6 +579,56 @@ function App() {
     setEditingTileSetId(project.tileSets[0].id)
     setSelectedId(project.areas[0].sections[0].id)
     setNotice('')
+  }
+
+  function deleteProject() {
+    if (projects.length <= 1 || !window.confirm(`Delete "${activeProject.name || 'Untitled project'}"? This cannot be undone.`)) return
+    const nextProjects = projects.filter((project) => project.id !== activeProject.id)
+    const nextProject = nextProjects[0]
+    setProjects(nextProjects)
+    setActiveProjectId(nextProject.id)
+    setActiveAreaId(nextProject.areas[0].id)
+    setEditingTileSetId(nextProject.tileSets[0].id)
+    setSelectedId(nextProject.areas[0].sections[0].id)
+    setNotice('')
+  }
+
+  function downloadBackup() {
+    const backup: ProjectBackup = { format: 'mmk-project-backup', version: 1, projects }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `mmk-projects-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  async function importBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      if (!isProjectBackup(parsed)) {
+        setActiveView('tiles')
+        setNotice('That file is not a supported MMK project backup.')
+        return
+      }
+      const imported = parsed.projects.map(prepareImportedProject)
+      setProjects((current) => [...current, ...imported])
+      setActiveProjectId(imported[0].id)
+      setActiveAreaId(imported[0].areas[0].id)
+      setEditingTileSetId(imported[0].tileSets[0].id)
+      setSelectedId(imported[0].areas[0].sections[0].id)
+      setActiveView('tiles')
+      setNotice(`Imported ${imported.length} ${imported.length === 1 ? 'project' : 'projects'}.`)
+    } catch {
+      setActiveView('tiles')
+      setNotice('Could not read that file. Choose a valid MMK project backup.')
+    }
   }
 
   function addArea() {
@@ -696,6 +808,10 @@ function App() {
         <div className="topbar-meta">MATERIAL MEASURING KIT</div>
         <div className="topbar-actions">
           <label className="project-picker"><span>Project</span><select value={activeProject.id} onChange={(event) => selectProject(event.target.value)} aria-label="Select project">{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label>
+          <button className="project-data-button" type="button" onClick={downloadBackup} aria-label="Download project backup" title="Download project backup"><img src={downloadIcon} alt="" /><span>Backup</span></button>
+          <button className="project-data-button" type="button" onClick={() => importFileRef.current?.click()} aria-label="Import project backup" title="Import project backup"><img src={packageIcon} alt="" /><span>Import</span></button>
+          <input ref={importFileRef} type="file" accept=".json,application/json" onChange={importBackup} hidden aria-label="Select project backup file" />
+          <button className="delete-project-button" type="button" onClick={deleteProject} disabled={projects.length <= 1} aria-label="Delete project" title={projects.length <= 1 ? 'At least one project must remain' : 'Delete project'}><img src={trashIcon} alt="" /></button>
           <button className="new-project-button" type="button" onClick={addProject}><img src={addIcon} alt="" /><span>New project</span></button>
           <label className="unit-select"><span>Units</span><select value={unit} onChange={(event) => changeUnit(event.target.value as Unit)} aria-label="Measurement units">
             {(['ft', 'in', 'cm', 'mm'] as Unit[]).map((option) => <option value={option} key={option}>{unitNames[option]}</option>)}
