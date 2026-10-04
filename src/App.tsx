@@ -267,8 +267,9 @@ function calculatePaint(sections: Rect[], paint: PaintSettings) {
   const deductions = paint.source === 'outline' ? countedOpenings + directOpeningArea : 0
   const netArea = Math.max(0, grossArea - deductions)
   const coats = Math.max(1, paint.coats)
-  const quantity = paint.volume === 'litres' ? netArea * coats * 4 / 25 : netArea * coats / 25
-  return { outlineArea, countedOpenings, directOpeningArea, grossArea, deductions, netArea, coats, quantity, cost: quantity * paint.unitPrice }
+  const rawQuantity = paint.volume === 'litres' ? netArea * coats * 4 / 25 : netArea * coats / 25
+  const quantity = Math.ceil(rawQuantity - 1e-10)
+  return { outlineArea, countedOpenings, directOpeningArea, grossArea, deductions, netArea, coats, rawQuantity, quantity, cost: quantity * paint.unitPrice }
 }
 
 function overlaps(first: Rect, second: Rect) {
@@ -1366,7 +1367,7 @@ function App() {
           <h2>{selectedArea.name}</h2>
           <div className="paint-summary-area"><span>Net painted area</span><strong>{paintEstimate.netArea.toFixed(2)} m²</strong><small>{areaFromSquareMetres(paintEstimate.netArea, 'ft2').toFixed(2)} ft²</small></div>
           {selectedArea.paint.source === 'outline' && <div className="paint-summary-lines"><div><span>Canvas outline</span><strong>{paintEstimate.grossArea.toFixed(2)} m²</strong></div><div><span>Openings</span><strong>−{paintEstimate.deductions.toFixed(2)} m²</strong></div></div>}
-          <div className="paint-quantity"><span>Paint needed · {paintEstimate.coats} {paintEstimate.coats === 1 ? 'coat' : 'coats'}</span><strong>{paintEstimate.quantity.toFixed(2)} <small>{selectedArea.paint.volume === 'litres' ? 'L' : 'gal'}</small></strong></div>
+          <div className="paint-quantity"><span>Paint to buy · {paintEstimate.coats} {paintEstimate.coats === 1 ? 'coat' : 'coats'}</span><strong>{paintEstimate.quantity} <small>{selectedArea.paint.volume === 'litres' ? 'L' : 'gal'}</small></strong></div>
           <div className="paint-price-result"><span>Estimated paint cost</span><strong>{formatMoney(paintEstimate.cost)}</strong></div>
           <p className="paint-coverage-note">{selectedArea.paint.volume === 'litres' ? '4 L' : '1 gallon'} covers 25 m² per coat.</p>
           <div className="live-computation paint-computation">
@@ -1380,8 +1381,8 @@ function App() {
                 <p>{(sectionBoundary.perimeter * 0.0254).toFixed(2)} m × {(selectedArea.paint.wallHeight * 0.0254).toFixed(2)} m = {paintEstimate.grossArea.toFixed(2)} m²</p>
                 <p>{paintEstimate.grossArea.toFixed(2)} − {paintEstimate.countedOpenings.toFixed(2)} counted − {paintEstimate.directOpeningArea.toFixed(2)} additional = {paintEstimate.netArea.toFixed(2)} m²</p>
               </>}
-              <p>{paintEstimate.netArea.toFixed(2)} m² × {paintEstimate.coats} coats{selectedArea.paint.volume === 'litres' ? ' × 4 ÷ 25' : ' ÷ 25'} = {paintEstimate.quantity.toFixed(2)} {selectedArea.paint.volume === 'litres' ? 'L' : 'gallons'}</p>
-              <p>{paintEstimate.quantity.toFixed(2)} × {formatMoney(selectedArea.paint.unitPrice)} = {formatMoney(paintEstimate.cost)}</p>
+              <p>{paintEstimate.netArea.toFixed(2)} m² × {paintEstimate.coats} coats{selectedArea.paint.volume === 'litres' ? ' × 4 ÷ 25' : ' ÷ 25'} = {paintEstimate.rawQuantity.toFixed(2)} {selectedArea.paint.volume === 'litres' ? 'L' : 'gallons'} required; round up to {paintEstimate.quantity} {selectedArea.paint.volume === 'litres' ? 'L' : 'gallons'} to buy.</p>
+              <p>{paintEstimate.quantity} × {formatMoney(selectedArea.paint.unitPrice)} = {formatMoney(paintEstimate.cost)}</p>
             </div>}
           </div>
         </aside>
@@ -1390,12 +1391,12 @@ function App() {
       {activeView === 'formulas' && <section className="calculations-workspace">
         <div className="calculations-heading"><div><p className="eyebrow">REFERENCE</p><h2>Formulas</h2></div></div>
         <div className="formula-list">
-          <article className="formula-item"><span className="formula-index">01</span><div><h3>Simple area tile quantity</h3><p>Use the room area and the area of one tile, then apply the selected tile set's wastage percentage and round up to a whole tile.</p><strong>Raw quantity = room area ÷ tile area</strong><strong>Total tiles = ceil(raw quantity × (1 + wastage% ÷ 100))</strong></div></article>
-          <article className="formula-item"><span className="formula-index">02</span><div><h3>Placement tile quantity</h3><p>Count whole and cut positions from the layout. Optional reuse follows a deterministic best-fit schedule for measured, same-orientation rectangular offcuts; irregular, split, or rotated profiles are excluded.</p><strong>Base tiles = whole positions + new cut-stock tiles in the fit schedule</strong><strong>Total tiles = base tiles + ceil(base tiles × wastage% ÷ 100)</strong></div></article>
-          <article className="formula-item"><span className="formula-index">03</span><div><h3>Canvas paint area</h3><p>Use the outer perimeter of the combined section area; shared and overlapping section edges are open, not walls. Multiply by wall height, convert to square metres, then subtract counted and additional opening area.</p><strong>Net area = max(0, outer perimeter × wall height − opening area)</strong></div></article>
-          <article className="formula-item"><span className="formula-index">04</span><div><h3>Manual paint area</h3><p>Enter area in square metres or square feet. Square feet are converted using 1 m² = 10.7639 ft².</p><strong>Net area = entered area in m²</strong></div></article>
-          <article className="formula-item"><span className="formula-index">05</span><div><h3>Paint quantity and cost</h3><p>Quantities scale by coat count. Litres and gallons use the specified coverage rates independently.</p><strong>Litres = area × coats × 4 ÷ 25</strong><strong>Gallons = area × coats ÷ 25</strong><strong>Cost = quantity × price per selected unit</strong></div></article>
-          <article className="formula-item"><span className="formula-index">06</span><div><h3>Boxes by supplier coverage</h3><p>Use the supplier's stated covered area per box instead of the tile count when calculating purchases.</p><strong>Boxes = ceil(required tile area ÷ coverage per box)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">01</span><div><h3>Simple area tile quantity</h3><p>Ito yung tinuro ni ma'am Aia, dont mind the placement tile quantity im still tinkering with it</p><strong>Raw quantity = room area ÷ tile area</strong><strong>Total tiles = ceil(raw quantity × (1 + wastage% ÷ 100))</strong></div></article>
+          <article className="formula-item"><span className="formula-index">02</span><div><h3>Placement tile quantity</h3><p>Counts full and cut tiles from the selected layout. Cut-tile reuse is still being refined.</p><strong>Base tiles = whole positions + new cut-stock tiles in the fit schedule</strong><strong>Total tiles = base tiles + ceil(base tiles × wastage% ÷ 100)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">03</span><div><h3>Canvas paint area</h3><p>The outer edge is the wall. Shared and overlapping edges are open. Multiply the perimeter by wall height, then subtract openings.</p><strong>Net area = max(0, outer perimeter × wall height − opening area)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">04</span><div><h3>Manual paint area</h3><p>Enter the painted area in m² or ft². ft² is converted to m².</p><strong>Net area = entered area in m²</strong></div></article>
+          <article className="formula-item"><span className="formula-index">05</span><div><h3>Paint quantity and cost</h3><p>Coverage gives the amount needed. The estimate rounds up to whole litres or gallons so it doesn't estimate less paint than you need.</p><strong>Raw litres = area × coats × 4 ÷ 25</strong><strong>Raw gallons = area × coats ÷ 25</strong><strong>Whole units to buy = ceil(raw quantity)</strong><strong>Cost = whole units to buy × price per selected unit</strong></div></article>
+          <article className="formula-item"><span className="formula-index">06</span><div><h3>Boxes by supplier coverage</h3><p>Enter the coverage listed on the box.</p><strong>Boxes = ceil(required tile area ÷ coverage per box)</strong></div></article>
         </div>
       </section>}
 
@@ -1421,7 +1422,7 @@ function App() {
         <h2>Tile set totals</h2>
         <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste (qty / %)</th><th>Total</th><th>Purchase</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)} / {wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes / ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]}` : `${boxes} boxes / ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
         <h2>Paint by area</h2>
-        <table><thead><tr><th>Area</th><th>Source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.paint.source === 'outline' ? 'Canvas outline' : 'Manual area'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity.toFixed(2)} {item.area.paint.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Area</th><th>Source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.paint.source === 'outline' ? 'Canvas outline' : 'Manual area'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity} {item.area.paint.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
       </section>
       {calculatorOpen
