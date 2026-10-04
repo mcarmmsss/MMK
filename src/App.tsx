@@ -710,18 +710,14 @@ function App() {
     return {
       area,
       tileSet,
-      tiles: estimate.baseTiles,
       base: estimate.baseTiles,
       waste: estimate.wasteTiles,
       wastePercent: tileSet.wasteOn ? tileSet.wastePercent : 0,
       total: estimate.materialTiles,
-      layoutPieces: estimate.layoutPieces,
-      areaRatio: estimate.areaRatio,
       tileWidth,
       tileHeight,
       bounds: getRectBounds(area.sections),
       pattern: getTilePattern(tileWidth, tileHeight, area.tileCalculation),
-      cutSummaries: summarizeTileCuts(estimate.layoutPieces.cuts, unit, area.tileCalculation.reuseCutTiles ? estimate.cutPlan : []),
     }
   })
   const receiptPaintItems = activeProject.areas.map((area) => ({ area, ...calculatePaint(area.sections, area.paint) }))
@@ -734,7 +730,6 @@ function App() {
     const amount = tileSet.priceMode === 'tile' ? total * tileSet.unitPrice : boxes * tileSet.unitPrice
     return { tileSet, base, waste, wastePercent: tileSet.wasteOn ? tileSet.wastePercent : 0, total, boxes, amount }
   }).filter((item) => item.total > 0)
-  const receiptCutItems = receiptItems.flatMap((item) => item.cutSummaries.map((cut, index) => ({ ...cut, area: item.area, tileSet: item.tileSet, index })))
   const receiptTileTotal = receiptTileSets.reduce((sum, item) => sum + item.amount, 0)
   const receiptPaintTotal = receiptPaintItems.reduce((sum, item) => sum + item.cost, 0)
   const receiptTotal = receiptTileTotal + receiptPaintTotal
@@ -1289,7 +1284,7 @@ function App() {
         <h1>{activeProject.name || 'Untitled project'}</h1>
         <p>Created {new Date().toLocaleDateString()}</p>
         <h2>Area quantities</h2>
-        <table><thead><tr><th>Area</th><th>Sections</th><th>Tile set / size</th><th>Layout</th><th>Base</th><th>Waste</th><th>Waste %</th><th>Total</th></tr></thead><tbody>{receiptItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.sections.map((section, index) => `Section ${index + 1}: ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}</td><td>{item.tileSet.name} · {displayLength(item.tileSet.width, unit)} × {displayLength(item.tileSet.height, unit)} {unit}</td><td>{getTileLayoutName(item.area.tileCalculation)}</td><td>{item.base.toFixed(item.area.tileCalculation.mode === 'simple' ? 2 : 0)}</td><td>{item.waste.toFixed(2)}</td><td>{item.wastePercent}%</td><td>{item.total} tiles</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Area</th><th>Tile set / size</th><th>Layout</th><th>Base</th><th>Waste (qty / %)</th><th>Total</th></tr></thead><tbody>{receiptItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.tileSet.name} · {displayLength(item.tileSet.width, unit)} × {displayLength(item.tileSet.height, unit)} {unit}</td><td>{getTileLayoutName(item.area.tileCalculation)}</td><td>{item.base.toFixed(item.area.tileCalculation.mode === 'simple' ? 2 : 0)}</td><td>{item.waste.toFixed(2)} / {item.wastePercent}%</td><td>{item.total} tiles</td></tr>)}</tbody></table>
         {showPlanInReceipt && <>
           <h2>Tile plans</h2>
           {receiptItems.map((item) => <figure className="receipt-plan" key={item.area.id}>
@@ -1301,12 +1296,8 @@ function App() {
             <p>Room: {item.area.sections.map((section, index) => `Section ${index + 1} ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}. Tile: {displayLength(item.tileWidth, unit)} × {displayLength(item.tileHeight, unit)} {unit}. Layout: {getTileLayoutName(item.area.tileCalculation)}.</p>
           </figure>)}
         </>}
-        <h2>Exact cut list</h2>
-        {receiptCutItems.length > 0
-          ? <table className="receipt-cut-table"><thead><tr><th>Area / tile set</th><th>Qty</th><th>Piece / profile</th><th>Cut and remainder</th><th>Pattern positions</th></tr></thead><tbody>{receiptCutItems.map((cut) => <tr key={`${cut.area.id}-${cut.index}`}><td>{cut.area.name} · {cut.tileSet.name}</td><td>{cut.quantity}</td><td>{cut.piece}</td><td>{cut.instruction}</td><td>{cut.positions.join(', ')}</td></tr>)}</tbody></table>
-          : <p>No partial tiles require cutting.</p>}
         <h2>Tile set totals</h2>
-        <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste</th><th>Waste %</th><th>Total needed</th><th>Boxes / contents</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)}</td><td>{wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes × ${tileSet.coveragePerBox} ${areaUnitLabels[tileSet.coverageUnit]}/box = ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]} covered` : `${boxes} boxes × ${tileSet.tilesPerBox} tiles/box = ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste (qty / %)</th><th>Total</th><th>Purchase</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)} / {wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes / ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]}` : `${boxes} boxes / ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
         <h2>Paint by area</h2>
         <table><thead><tr><th>Area</th><th>Source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.paint.source === 'outline' ? 'Canvas outline' : 'Manual area'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity.toFixed(2)} {item.area.paint.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
