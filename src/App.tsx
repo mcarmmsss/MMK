@@ -954,7 +954,19 @@ function App() {
       x = selected.x + (selected.width - width) * factor
       y = attachSide === 'south' ? selected.y + selected.height : selected.y - height
     }
-    const added = { id: Math.max(...sections.map((section) => section.id)) + 1, x, y, width, height }
+    const addedId = Math.max(...sections.map((section) => section.id)) + 1
+    let placement: Rect = { id: addedId, x, y, width, height }
+    if (attachSide === 'west' && sections.some((section) => overlaps(placement, section))) {
+      const westEdge = Math.min(...sections.map((section) => section.x))
+      const westAnchors = sections
+        .filter((section) => Math.abs(section.x - westEdge) < 0.001)
+        .sort((first, second) => Math.abs(first.y + first.height / 2 - (selected.y + selected.height / 2)) - Math.abs(second.y + second.height / 2 - (selected.y + selected.height / 2)))
+      const openPlacement = westAnchors
+        .map((section) => ({ id: addedId, x: westEdge - width, y: section.y + (section.height - height) * factor, width, height }))
+        .find((candidate) => !sections.some((section) => overlaps(candidate, section)) && connected([...sections, { ...candidate, id: -1 }]))
+      if (openPlacement) placement = openPlacement
+    }
+    const added = placement
     if (sections.some((section) => overlaps(added, section))) {
       setNotice('That placement overlaps another section.')
       return
