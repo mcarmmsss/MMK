@@ -199,20 +199,44 @@ function areaFromSquareMetres(value: number, unit: AreaUnit) {
   return unit === 'm2' ? value : value * squareFeetInSquareMetre
 }
 
+function getRectUnionBoundary(rects: Rect[]) {
+  const xCoordinates = [...new Set(rects.flatMap((rect) => [rect.x, rect.x + rect.width]))].sort((first, second) => first - second)
+  const yCoordinates = [...new Set(rects.flatMap((rect) => [rect.y, rect.y + rect.height]))].sort((first, second) => first - second)
+  const occupied = yCoordinates.slice(0, -1).map((y, row) => xCoordinates.slice(0, -1).map((x, column) => {
+    const centerX = (x + xCoordinates[column + 1]) / 2
+    const centerY = (y + yCoordinates[row + 1]) / 2
+    return rects.some((rect) => centerX > rect.x && centerX < rect.x + rect.width && centerY > rect.y && centerY < rect.y + rect.height)
+  }))
+  const segments: string[] = []
+  let perimeter = 0
+  occupied.forEach((row, rowIndex) => row.forEach((isOccupied, columnIndex) => {
+    if (!isOccupied) return
+    const left = xCoordinates[columnIndex]
+    const right = xCoordinates[columnIndex + 1]
+    const top = yCoordinates[rowIndex]
+    const bottom = yCoordinates[rowIndex + 1]
+    if (!occupied[rowIndex - 1]?.[columnIndex]) {
+      segments.push(`M ${left} ${top} H ${right}`)
+      perimeter += right - left
+    }
+    if (!row[columnIndex + 1]) {
+      segments.push(`M ${right} ${top} V ${bottom}`)
+      perimeter += bottom - top
+    }
+    if (!occupied[rowIndex + 1]?.[columnIndex]) {
+      segments.push(`M ${left} ${bottom} H ${right}`)
+      perimeter += right - left
+    }
+    if (!row[columnIndex - 1]) {
+      segments.push(`M ${left} ${top} V ${bottom}`)
+      perimeter += bottom - top
+    }
+  }))
+  return { perimeter, path: segments.join(' ') }
+}
+
 function outlinePerimeter(rects: Rect[]) {
-  const sectionPerimeters = rects.reduce((total, rect) => total + 2 * (rect.width + rect.height), 0)
-  let sharedEdges = 0
-  rects.forEach((rect, index) => {
-    rects.slice(index + 1).forEach((other) => {
-      if (Math.abs(rect.x + rect.width - other.x) < 0.001 || Math.abs(other.x + other.width - rect.x) < 0.001) {
-        sharedEdges += Math.max(0, Math.min(rect.y + rect.height, other.y + other.height) - Math.max(rect.y, other.y))
-      }
-      if (Math.abs(rect.y + rect.height - other.y) < 0.001 || Math.abs(other.y + other.height - rect.y) < 0.001) {
-        sharedEdges += Math.max(0, Math.min(rect.x + rect.width, other.x + other.width) - Math.max(rect.x, other.x))
-      }
-    })
-  })
-  return sectionPerimeters - sharedEdges * 2
+  return getRectUnionBoundary(rects).perimeter
 }
 
 function calculatePaint(sections: Rect[], paint: PaintSettings) {
@@ -694,6 +718,8 @@ function App() {
   const editingWidth = editingTileSet.rotated ? editingTileSet.height : editingTileSet.width
   const editingHeight = editingTileSet.rotated ? editingTileSet.width : editingTileSet.height
   const visualSections = drag ? sections.map((section) => section.id === drag.id ? drag.draft : section) : sections
+  const visualBoundary = getRectUnionBoundary(visualSections)
+  const sectionBoundary = getRectUnionBoundary(sections)
   const tileEstimate = calculateTileEstimate(selectedArea, assignedTileSet)
   const selectedCutSummaries = summarizeTileCuts(tileEstimate.layoutPieces.cuts, unit, selectedArea.tileCalculation.reuseCutTiles ? tileEstimate.cutPlan : [])
   const baseTiles = tileEstimate.baseTiles
@@ -1149,14 +1175,14 @@ function App() {
               <rect x={bounds.minX} y={bounds.minY} width={bounds.width} height={bounds.height} fill="url(#canvas-grid-bg)" />
               {visualSections.map((section) => {
                 return <g key={section.id} onPointerDown={(event) => startDrag(event, section)} onClick={() => { setSelectedId(section.id); setNotice('') }} className="canvas-section" role="button" aria-label={`Select area section ${section.id}; drag to reposition`} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelectedId(section.id) }}>
-                <rect x={section.x} y={section.y} width={section.width} height={section.height} fill="#252724" />
+                <rect x={section.x} y={section.y} width={section.width} height={section.height} fill={section.id === selectedId ? '#302d26' : '#252724'} />
                 <rect x={section.x} y={section.y} width={section.width} height={section.height} fill="url(#canvas-grid)" clipPath={`url(#section-clip-${section.id})`} />
-                <rect x={section.x} y={section.y} width={section.width} height={section.height} fill="none" stroke={section.id === selectedId ? '#d6a173' : '#77796f'} strokeWidth={section.id === selectedId ? Math.max(tileW, tileH) * 0.055 : Math.max(tileW, tileH) * 0.025} />
                 <text x={section.x + section.width / 2} y={section.y + section.height / 2} textAnchor="middle" dominantBaseline="middle" className="canvas-section-label">{section.id === 1 ? selectedArea.name.toUpperCase() : `SECTION ${sections.findIndex((item) => item.id === section.id) + 1}`}</text>
               </g>
               })}
+              <path d={visualBoundary.path} fill="none" stroke="#d6a173" strokeWidth={Math.max(tileW, tileH) * 0.04} pointerEvents="none" />
             </svg>
-            <div className="canvas-caption"><span><span className="legend-swatch" /> Area outline</span><span><span className="legend-grid" /> {selectedArea.tileCalculation.layout === 'running-bond' ? `Running bond · ${Math.round(bondOffset * 100)}% offset` : selectedArea.tileCalculation.layout === 'diagonal' ? 'Diagonal layout' : selectedArea.tileCalculation.layout === 'herringbone' ? 'Herringbone layout' : 'Straight layout'} · {displayLength(tileW, unit)} × {displayLength(tileH, unit)} {unit}</span><span className="canvas-hint"><img src={moveIcon} alt="" /> Drag sections to reposition</span></div>
+            <div className="canvas-caption"><span><span className="legend-swatch" /> Outer boundary · shared edges open</span><span><span className="legend-grid" /> {selectedArea.tileCalculation.layout === 'running-bond' ? `Running bond · ${Math.round(bondOffset * 100)}% offset` : selectedArea.tileCalculation.layout === 'diagonal' ? 'Diagonal layout' : selectedArea.tileCalculation.layout === 'herringbone' ? 'Herringbone layout' : 'Straight layout'} · {displayLength(tileW, unit)} × {displayLength(tileH, unit)} {unit}</span><span className="canvas-hint"><img src={moveIcon} alt="" /> Drag sections to reposition</span></div>
           </div>
 
           <div className="estimate-header"><div><p className="eyebrow">MATERIAL ESTIMATE</p><h2>{selectedArea.name}</h2></div><span className="estimate-count"><strong>{materialTiles.toLocaleString()}</strong><small>tiles total</small></span></div>
@@ -1212,12 +1238,20 @@ function App() {
             const area = activeProject.areas.find((entry) => entry.id === Number(event.target.value))
             if (area) selectArea(area)
           }}>{activeProject.areas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select></label></div>
+          <article className="paint-plan-preview">
+            <div><strong>OPEN AREA PLAN</strong><span>{displayLength(bounds.roomWidth, unit)} × {displayLength(bounds.roomHeight, unit)} {unit}</span></div>
+            <svg viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`} role="img" aria-label={`${selectedArea.name} open area plan; shared section edges are not walls`}>
+              {sections.map((section) => <rect key={section.id} x={section.x} y={section.y} width={section.width} height={section.height} fill="#34332d" />)}
+              <path d={sectionBoundary.path} fill="none" stroke="#d6a173" strokeWidth={Math.max(tileW, tileH) * 0.045} />
+            </svg>
+            <p>Connected or overlapping sections are open; only the outer boundary is counted as wall.</p>
+          </article>
           <div className="paint-field-group">
             <span className="field-caption">Painted area source</span>
             <div className="segmented-control source-toggle"><button className={selectedArea.paint.source === 'outline' ? 'active' : ''} type="button" aria-pressed={selectedArea.paint.source === 'outline'} onClick={() => updatePaint((paint) => ({ ...paint, source: 'outline' }))}>Canvas outline</button><button className={selectedArea.paint.source === 'manual' ? 'active' : ''} type="button" aria-pressed={selectedArea.paint.source === 'manual'} onClick={() => updatePaint((paint) => ({ ...paint, source: 'manual' }))}>Manual area</button></div>
           </div>
           {selectedArea.paint.source === 'outline' ? <>
-            <div className="paint-outline-summary"><span>Wall outline from {sections.length} {sections.length === 1 ? 'section' : 'sections'}</span><strong>{(outlinePerimeter(sections) * 0.0254).toFixed(2)} m perimeter</strong></div>
+            <div className="paint-outline-summary"><span>Outer wall · shared edges excluded</span><strong>{(sectionBoundary.perimeter * 0.0254).toFixed(2)} m perimeter</strong></div>
             <label className="paint-field"><span>Wall height</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(selectedArea.paint.wallHeight, unit))} onValueChange={(value) => {
               if (value > 0) updatePaint((paint) => ({ ...paint, wallHeight: toInches(value, unit) }))
             }} /><small>{unit}</small></span></label>
@@ -1255,8 +1289,8 @@ function App() {
                 <div><span>Entered area</span><strong>{selectedArea.paint.manualArea.toFixed(2)} {selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'}</strong></div>
                 <p>{selectedArea.paint.manualArea.toFixed(2)} {selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'} = {paintEstimate.netArea.toFixed(2)} m²</p>
               </> : <>
-                <div><span>Outline perimeter</span><strong>{(outlinePerimeter(sections) * 0.0254).toFixed(2)} m</strong></div>
-                <p>{(outlinePerimeter(sections) * 0.0254).toFixed(2)} m × {(selectedArea.paint.wallHeight * 0.0254).toFixed(2)} m = {paintEstimate.grossArea.toFixed(2)} m²</p>
+                <div><span>Outer perimeter · shared edges excluded</span><strong>{(sectionBoundary.perimeter * 0.0254).toFixed(2)} m</strong></div>
+                <p>{(sectionBoundary.perimeter * 0.0254).toFixed(2)} m × {(selectedArea.paint.wallHeight * 0.0254).toFixed(2)} m = {paintEstimate.grossArea.toFixed(2)} m²</p>
                 <p>{paintEstimate.grossArea.toFixed(2)} − {paintEstimate.countedOpenings.toFixed(2)} counted − {paintEstimate.directOpeningArea.toFixed(2)} additional = {paintEstimate.netArea.toFixed(2)} m²</p>
               </>}
               <p>{paintEstimate.netArea.toFixed(2)} m² × {paintEstimate.coats} coats{selectedArea.paint.volume === 'litres' ? ' × 4 ÷ 25' : ' ÷ 25'} = {paintEstimate.quantity.toFixed(2)} {selectedArea.paint.volume === 'litres' ? 'L' : 'gallons'}</p>
@@ -1271,7 +1305,7 @@ function App() {
         <div className="formula-list">
           <article className="formula-item"><span className="formula-index">01</span><div><h3>Simple area tile quantity</h3><p>Use the room area and the area of one tile, then apply the selected tile set's wastage percentage and round up to a whole tile.</p><strong>Raw quantity = room area ÷ tile area</strong><strong>Total tiles = ceil(raw quantity × (1 + wastage% ÷ 100))</strong></div></article>
           <article className="formula-item"><span className="formula-index">02</span><div><h3>Placement tile quantity</h3><p>Count whole and cut positions from the layout. Optional reuse follows a deterministic best-fit schedule for measured, same-orientation rectangular offcuts; irregular, split, or rotated profiles are excluded.</p><strong>Base tiles = whole positions + new cut-stock tiles in the fit schedule</strong><strong>Total tiles = base tiles + ceil(base tiles × wastage% ÷ 100)</strong></div></article>
-          <article className="formula-item"><span className="formula-index">03</span><div><h3>Canvas paint area</h3><p>Remove joined section edges from the outline perimeter, multiply by wall height, convert to square metres, then subtract counted and additional opening area.</p><strong>Net area = max(0, perimeter × wall height − opening area)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">03</span><div><h3>Canvas paint area</h3><p>Use the outer perimeter of the combined section area; shared and overlapping section edges are open, not walls. Multiply by wall height, convert to square metres, then subtract counted and additional opening area.</p><strong>Net area = max(0, outer perimeter × wall height − opening area)</strong></div></article>
           <article className="formula-item"><span className="formula-index">04</span><div><h3>Manual paint area</h3><p>Enter area in square metres or square feet. Square feet are converted using 1 m² = 10.7639 ft².</p><strong>Net area = entered area in m²</strong></div></article>
           <article className="formula-item"><span className="formula-index">05</span><div><h3>Paint quantity and cost</h3><p>Quantities scale by coat count. Litres and gallons use the specified coverage rates independently.</p><strong>Litres = area × coats × 4 ÷ 25</strong><strong>Gallons = area × coats ÷ 25</strong><strong>Cost = quantity × price per selected unit</strong></div></article>
           <article className="formula-item"><span className="formula-index">06</span><div><h3>Boxes by supplier coverage</h3><p>Use the supplier's stated covered area per box instead of the tile count when calculating purchases.</p><strong>Boxes = ceil(required tile area ÷ coverage per box)</strong></div></article>
