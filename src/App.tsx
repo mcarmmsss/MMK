@@ -20,6 +20,7 @@ type PaintVolume = 'litres' | 'gallons'
 type TileMode = 'layout' | 'simple'
 type TileLayout = 'straight' | 'running-bond' | 'diagonal' | 'herringbone'
 type BondOffsetMode = 'half' | 'third' | 'custom'
+type BondDirection = 'horizontal' | 'vertical'
 type Side = 'north' | 'east' | 'south' | 'west'
 type Alignment = 'start' | 'center' | 'end'
 type Rect = { id: number; x: number; y: number; width: number; height: number }
@@ -30,7 +31,7 @@ type TileCutPlan = { row: number; column: number; stockTile: number; sourceWidth
 type TilePieceCount = { total: number; full: number; cut: number; cutArea: number; cuts: TileCut[]; rows: TileRowCount[]; approximate: boolean }
 type Opening = { id: number; count: number; width: number; height: number }
 type PaintSettings = { source: PaintSource; manualArea: number; manualUnit: AreaUnit; wallHeight: number; openings: Opening[]; openingArea: number; openingAreaUnit: AreaUnit; coats: number; volume: PaintVolume; unitPrice: number }
-type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; customBondOffset: number; reuseCutTiles: boolean }
+type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; bondDirection: BondDirection; customBondOffset: number; reuseCutTiles: boolean }
 type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number; boxContentMode: 'tiles' | 'area'; coveragePerBox: number; coverageUnit: AreaUnit }
 type Area = { id: number; name: string; tileSetId: string; sections: Rect[]; paint: PaintSettings; tileCalculation: TileCalculation }
 type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[] }
@@ -56,7 +57,7 @@ function createPaintSettings(): PaintSettings {
 }
 
 function createTileCalculation(): TileCalculation {
-  return { mode: 'layout', layout: 'straight', bondOffsetMode: 'half', customBondOffset: 0.5, reuseCutTiles: false }
+  return { mode: 'layout', layout: 'straight', bondOffsetMode: 'half', bondDirection: 'horizontal', customBondOffset: 0.5, reuseCutTiles: false }
 }
 
 function createProject(name = 'Untitled project'): Project {
@@ -101,6 +102,7 @@ function isProjectBackup(value: unknown): value is ProjectBackup {
       const validCalculation = (calculation.mode === 'layout' || calculation.mode === 'simple') &&
         (calculation.layout === 'straight' || calculation.layout === 'running-bond' || calculation.layout === 'diagonal' || calculation.layout === 'herringbone') &&
         (calculation.bondOffsetMode === 'half' || calculation.bondOffsetMode === 'third' || calculation.bondOffsetMode === 'custom') && isFiniteNumber(calculation.customBondOffset) &&
+        (calculation.bondDirection === undefined || calculation.bondDirection === 'horizontal' || calculation.bondDirection === 'vertical') &&
         (calculation.reuseCutTiles === undefined || typeof calculation.reuseCutTiles === 'boolean')
       return validPaint && validCalculation
     })
@@ -359,6 +361,50 @@ function countAxisAlignedTiles(rects: Rect[], tileWidth: number, tileHeight: num
   return { total, full, cut: total - full, cutArea, cuts, rows, approximate: false }
 }
 
+function countVerticalRunningBondTiles(rects: Rect[], tileWidth: number, tileHeight: number, offset: number): TilePieceCount {
+  const minX = Math.min(...rects.map((rect) => rect.x))
+  const minY = Math.min(...rects.map((rect) => rect.y))
+  const maxX = Math.max(...rects.map((rect) => rect.x + rect.width))
+  const maxY = Math.max(...rects.map((rect) => rect.y + rect.height))
+  const firstColumn = Math.floor(minX / tileHeight) - 1
+  const lastColumn = Math.ceil(maxX / tileHeight) + 1
+  const pieces = new Map<string, boolean>()
+  const courseCounts = new Map<number, { full: number; cut: number }>()
+  const cuts: TileCut[] = []
+  let cutArea = 0
+
+  for (let column = firstColumn; column < lastColumn; column += 1) {
+    const shift = column % 2 === 0 ? 0 : offset * tileWidth
+    const firstRow = Math.floor((minY - shift) / tileWidth) - 1
+    const lastRow = Math.ceil((maxY - shift) / tileWidth) + 1
+    for (let row = firstRow; row < lastRow; row += 1) {
+      const x = column * tileHeight
+      const y = row * tileWidth + shift
+      const fragments = rects.map((rect) => {
+        const width = Math.max(0, Math.min(x + tileHeight, rect.x + rect.width) - Math.max(x, rect.x))
+        const height = Math.max(0, Math.min(y + tileWidth, rect.y + rect.height) - Math.max(y, rect.y))
+        return { x: Math.max(x, rect.x), y: Math.max(y, rect.y), width, height }
+      }).filter((fragment) => fragment.width > 0.001 && fragment.height > 0.001)
+      const covered = fragments.reduce((total, fragment) => total + fragment.width * fragment.height, 0)
+      if (covered > 0.001) {
+        const full = covered >= tileWidth * tileHeight - 0.001
+        pieces.set(`${column}:${row}`, full)
+        if (!full) {
+          cutArea += covered
+          fragments.forEach((fragment) => cuts.push({ row: column, column: row, tileX: x, tileY: y, tileWidth: tileHeight, tileHeight: tileWidth, ...fragment }))
+        }
+        const counts = courseCounts.get(column) ?? { full: 0, cut: 0 }
+        counts[full ? 'full' : 'cut'] += 1
+        courseCounts.set(column, counts)
+      }
+    }
+  }
+  const full = [...pieces.values()].filter(Boolean).length
+  const total = pieces.size
+  const rows = [...courseCounts].map(([row, counts]) => ({ row, ...counts })).sort((first, second) => first.row - second.row)
+  return { total, full, cut: total - full, cutArea, cuts, rows, approximate: false }
+}
+
 function clipPolygon(polygon: Point[], edge: 'left' | 'right' | 'top' | 'bottom', bound: number) {
   const inside = (point: Point) => edge === 'left' ? point.x >= bound : edge === 'right' ? point.x <= bound : edge === 'top' ? point.y >= bound : point.y <= bound
   const intersection = (start: Point, end: Point): Point => {
@@ -535,9 +581,14 @@ function countHerringboneTiles(rects: Rect[], tileWidth: number, tileHeight: num
   return { total: pieces.length, full, cut: pieces.length - full, cutArea, cuts, rows, approximate: false }
 }
 
-function countPatternTilePieces(rects: Rect[], tileWidth: number, tileHeight: number, layout: TileLayout, offset: number): TilePieceCount {
+function countPatternTilePieces(rects: Rect[], tileWidth: number, tileHeight: number, calculation: TileCalculation, offset: number): TilePieceCount {
+  const { layout } = calculation
   if (layout === 'diagonal') return countDiagonalTiles(rects, tileWidth, tileHeight)
-  if (layout === 'running-bond') return countAxisAlignedTiles(rects, tileWidth, tileHeight, offset)
+  if (layout === 'running-bond') {
+    return calculation.bondDirection === 'vertical'
+      ? countVerticalRunningBondTiles(rects, tileWidth, tileHeight, offset)
+      : countAxisAlignedTiles(rects, tileWidth, tileHeight, offset)
+  }
   if (layout === 'herringbone') return countHerringboneTiles(rects, tileWidth, tileHeight)
   return countAxisAlignedTiles(rects, tileWidth, tileHeight, 0)
 }
@@ -550,7 +601,7 @@ function getBondOffset(calculation: TileCalculation) {
 
 function getTileLayoutName(calculation: TileCalculation) {
   return calculation.layout === 'running-bond'
-    ? `Running bond · ${Math.round(getBondOffset(calculation) * 100)}% offset`
+    ? `Running bond · ${Math.round(getBondOffset(calculation) * 100)}% offset${calculation.bondDirection === 'vertical' ? ' · vertical' : ''}`
     : calculation.layout.replace('-', ' ')
 }
 
@@ -558,6 +609,16 @@ function getTilePattern(tileWidth: number, tileHeight: number, calculation: Tile
   const bondOffset = getBondOffset(calculation)
   const bondColumns = calculation.bondOffsetMode === 'half' ? 2 : calculation.bondOffsetMode === 'third' ? 3 : 100
   if (calculation.layout === 'running-bond') {
+    if (calculation.bondDirection === 'vertical') {
+      const width = tileHeight * 2
+      const height = tileWidth * bondColumns
+      const path = Array.from({ length: 2 }, (_, column) => {
+        const offset = column === 0 ? 0 : bondOffset * tileWidth
+        const horizontals = Array.from({ length: bondColumns + 2 }, (_, row) => `M ${column * tileHeight} ${row * tileWidth + offset} H ${(column + 1) * tileHeight}`).join(' ')
+        return `${horizontals} M ${column * tileHeight} 0 V ${height}`
+      }).join(' ')
+      return { width, height, path, transform: undefined }
+    }
     const width = tileWidth * bondColumns
     const path = Array.from({ length: 2 }, (_, row) => {
       const offset = row === 0 ? 0 : bondOffset * tileWidth
@@ -673,7 +734,7 @@ function calculateTileEstimate(area: Area, tileSet: TileSet) {
   const tileWidth = tileSet.rotated ? tileSet.height : tileSet.width
   const tileHeight = tileSet.rotated ? tileSet.width : tileSet.height
   const areaRatio = areaInSquareInches(area.sections) / (tileWidth * tileHeight)
-  const layoutPieces = countPatternTilePieces(area.sections, tileWidth, tileHeight, area.tileCalculation.layout, getBondOffset(area.tileCalculation))
+  const layoutPieces = countPatternTilePieces(area.sections, tileWidth, tileHeight, area.tileCalculation, getBondOffset(area.tileCalculation))
   const cutReuse = calculateRectangularCutReuse(layoutPieces, tileWidth, tileHeight)
   const reuseSupported = cutReuse !== null
   const reusedBaseTiles = cutReuse?.baseTiles ?? layoutPieces.total
@@ -778,8 +839,6 @@ function App() {
   const receiptTileTotal = receiptTileSets.reduce((sum, item) => sum + item.amount, 0)
   const receiptPaintTotal = receiptPaintItems.reduce((sum, item) => sum + item.cost, 0)
   const receiptTotal = receiptTileTotal + receiptPaintTotal
-  const bondOffset = getBondOffset(selectedArea.tileCalculation)
-  const bondPatternColumns = selectedArea.tileCalculation.bondOffsetMode === 'half' ? 2 : selectedArea.tileCalculation.bondOffsetMode === 'third' ? 3 : 100
   const herringboneUnit = Math.min(tileW, tileH)
   const herringbonePlacements = [
     { x: 0, y: 0, width: 2, height: 1 },
@@ -791,14 +850,11 @@ function App() {
     { x: 0, y: 1, width: 1, height: 2 },
     { x: 3, y: 1, width: 1, height: 2 },
   ]
-  const tilePatternWidth = selectedArea.tileCalculation.layout === 'running-bond' ? tileW * bondPatternColumns : selectedArea.tileCalculation.layout === 'herringbone' ? herringboneUnit * 4 : tileW
-  const tilePatternHeight = selectedArea.tileCalculation.layout === 'running-bond' ? tileH * 2 : selectedArea.tileCalculation.layout === 'herringbone' ? herringboneUnit * 4 : tileH
+  const selectedTilePattern = getTilePattern(tileW, tileH, selectedArea.tileCalculation)
+  const tilePatternWidth = selectedArea.tileCalculation.layout === 'running-bond' ? selectedTilePattern.width : selectedArea.tileCalculation.layout === 'herringbone' ? herringboneUnit * 4 : tileW
+  const tilePatternHeight = selectedArea.tileCalculation.layout === 'running-bond' ? selectedTilePattern.height : selectedArea.tileCalculation.layout === 'herringbone' ? herringboneUnit * 4 : tileH
   const tilePatternPath = selectedArea.tileCalculation.layout === 'running-bond'
-    ? Array.from({ length: 2 }, (_, row) => {
-      const offset = row === 0 ? 0 : bondOffset * tileW
-      const verticals = Array.from({ length: bondPatternColumns + 2 }, (_, column) => `M ${column * tileW + offset} ${row * tileH} V ${(row + 1) * tileH}`).join(' ')
-      return `${verticals} M 0 ${(row + 1) * tileH} H ${tilePatternWidth}`
-    }).join(' ')
+    ? selectedTilePattern.path
     : selectedArea.tileCalculation.layout === 'herringbone'
       ? herringbonePlacements.map((placement) => `M ${placement.x * herringboneUnit} ${placement.y * herringboneUnit} h ${placement.width * herringboneUnit} v ${placement.height * herringboneUnit} h ${-placement.width * herringboneUnit} Z`).join(' ')
       : `M ${tilePatternWidth} 0 L 0 0 0 ${tilePatternHeight}`
@@ -1165,7 +1221,7 @@ function App() {
             <div className="segmented-control calculation-mode"><button className={selectedArea.tileCalculation.mode === 'layout' ? 'active' : ''} type="button" aria-pressed={selectedArea.tileCalculation.mode === 'layout'} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, mode: 'layout' }))}>Placement</button><button className={selectedArea.tileCalculation.mode === 'simple' ? 'active' : ''} type="button" aria-pressed={selectedArea.tileCalculation.mode === 'simple'} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, mode: 'simple' }))}>Simple area</button></div>
             {selectedArea.tileCalculation.mode === 'layout' && <>
               <label className="tile-layout-select"><span>Placement layout</span><select value={selectedArea.tileCalculation.layout} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, layout: event.target.value as TileLayout }))}><option value="straight">Straight / grid</option><option value="running-bond">Running bond</option><option value="diagonal">Diagonal</option><option value="herringbone">Herringbone</option></select></label>
-              {selectedArea.tileCalculation.layout === 'running-bond' && <div className="bond-offset-fields"><label className="tile-layout-select"><span>Row offset</span><select value={selectedArea.tileCalculation.bondOffsetMode} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondOffsetMode: event.target.value as BondOffsetMode }))}><option value="half">Half tile</option><option value="third">Third tile</option><option value="custom">Custom fraction</option></select></label>{selectedArea.tileCalculation.bondOffsetMode === 'custom' && <label className="tile-layout-select"><span>Offset of tile width</span><span className="input-wrap"><NumericInput min="5" max="95" step="1" value={Math.round(selectedArea.tileCalculation.customBondOffset * 100)} onValueChange={(value) => updateTileCalculation((calculation) => ({ ...calculation, customBondOffset: Math.min(0.95, Math.max(0.05, value / 100)) }))} /><small>%</small></span></label>}</div>}
+              {selectedArea.tileCalculation.layout === 'running-bond' && <div className="bond-offset-fields"><label className="tile-layout-select"><span>Course direction</span><select value={selectedArea.tileCalculation.bondDirection ?? 'horizontal'} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondDirection: event.target.value as BondDirection }))}><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label><label className="tile-layout-select"><span>Row offset</span><select value={selectedArea.tileCalculation.bondOffsetMode} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondOffsetMode: event.target.value as BondOffsetMode }))}><option value="half">Half tile</option><option value="third">Third tile</option><option value="custom">Custom fraction</option></select></label>{selectedArea.tileCalculation.bondOffsetMode === 'custom' && <label className="tile-layout-select"><span>Offset of tile {selectedArea.tileCalculation.bondDirection === 'vertical' ? 'length' : 'width'}</span><span className="input-wrap"><NumericInput min="5" max="95" step="1" value={Math.round(selectedArea.tileCalculation.customBondOffset * 100)} onValueChange={(value) => updateTileCalculation((calculation) => ({ ...calculation, customBondOffset: Math.min(0.95, Math.max(0.05, value / 100)) }))} /><small>%</small></span></label>}</div>}
               {selectedArea.tileCalculation.layout === 'herringbone' && <p className="section-description layout-note">A 2:1 tile proportion gives the standard herringbone pattern. Other proportions use an approximate count.</p>}
             </>}
             {selectedArea.tileCalculation.mode === 'layout' && <div className="reuse-control"><div><span>Reuse cut tiles</span><p>{tileEstimate.reuseSupported ? 'Uses a best-fit schedule for same-orientation rectangular offcuts.' : 'Irregular, split, or rotated cuts are not reused.'}</p></div><button className={`switch ${selectedArea.tileCalculation.reuseCutTiles ? 'is-on' : ''}`} type="button" role="switch" aria-checked={selectedArea.tileCalculation.reuseCutTiles} aria-label="Reuse cut tiles" disabled={!tileEstimate.reuseSupported} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, reuseCutTiles: !calculation.reuseCutTiles }))}><span /></button></div>}
@@ -1213,7 +1269,7 @@ function App() {
               })}
               <path d={visualBoundary.path} fill="none" stroke="#d6a173" strokeWidth={Math.max(tileW, tileH) * 0.04} pointerEvents="none" />
             </svg>
-            <div className="canvas-caption"><span><span className="legend-swatch" /> Outer boundary · shared edges open</span><span><span className="legend-grid" /> {selectedArea.tileCalculation.layout === 'running-bond' ? `Running bond · ${Math.round(bondOffset * 100)}% offset` : selectedArea.tileCalculation.layout === 'diagonal' ? 'Diagonal layout' : selectedArea.tileCalculation.layout === 'herringbone' ? 'Herringbone layout' : 'Straight layout'} · {displayLength(tileW, unit)} × {displayLength(tileH, unit)} {unit}</span><span className="canvas-hint"><img src={moveIcon} alt="" /> Drag sections to reposition</span></div>
+            <div className="canvas-caption"><span><span className="legend-swatch" /> Outer boundary · shared edges open</span><span><span className="legend-grid" /> {getTileLayoutName(selectedArea.tileCalculation)} · {displayLength(tileW, unit)} × {displayLength(tileH, unit)} {unit}</span><span className="canvas-hint"><img src={moveIcon} alt="" /> Drag sections to reposition</span></div>
           </div>
 
           <div className="estimate-header"><div><p className="eyebrow">MATERIAL ESTIMATE</p><h2>{selectedArea.name}</h2></div><span className="estimate-count"><strong>{materialTiles.toLocaleString()}</strong><small>tiles total</small></span></div>
@@ -1237,11 +1293,11 @@ function App() {
                 <p>{tileEstimate.areaRatio.toFixed(2)} × {tileEstimate.wastePercent}% = {tileEstimate.wasteTiles.toFixed(2)} extra tiles</p>
                 <p>ceil({tileEstimate.areaRatio.toFixed(2)} + {tileEstimate.wasteTiles.toFixed(2)}) = {tileEstimate.materialTiles} tiles</p>
               </> : <>
-                <div><span>Placement</span><strong>{selectedArea.tileCalculation.layout.replace('-', ' ')}{selectedArea.tileCalculation.layout === 'running-bond' ? ` · ${Math.round(bondOffset * 100)}% offset` : ''}</strong></div>
+                <div><span>Placement</span><strong>{getTileLayoutName(selectedArea.tileCalculation)}</strong></div>
                 <p>{tileEstimate.layoutPieces.full} whole + {tileEstimate.layoutPieces.cut} cut = {tileEstimate.layoutPieces.total} base tiles{tileEstimate.layoutPieces.approximate ? ' · approximate for this tile proportion' : ''}</p>
                 <p>Measured partial-tile area: {(tileEstimate.layoutPieces.cutArea / squareUnitScale).toFixed(2)} {unit}² across {tileEstimate.layoutPieces.cut} cut positions</p>
                 <p>{tileEstimate.reuseSupported ? `Best-fit offcut schedule: ${tileEstimate.layoutPieces.full} whole + ${tileEstimate.layoutPieces.cut - tileEstimate.reuseSavings} cut-stock tiles = ${tileEstimate.reusedBaseTiles} base tiles; saves ${tileEstimate.reuseSavings} tiles` : 'Offcut reuse is not counted for split or irregular cut profiles'}{selectedArea.tileCalculation.reuseCutTiles && tileEstimate.reuseSupported ? ' · applied' : ' · not applied'}</p>
-                <div className="computation-rows"><span>Tile positions by row</span>{tileEstimate.layoutPieces.rows.map((row, index) => <div key={row.row}><span>Row {index + 1}</span><strong>{row.full} whole + {row.cut} cut = {row.full + row.cut}</strong></div>)}</div>
+                <div className="computation-rows"><span>Tile positions by {selectedArea.tileCalculation.layout === 'running-bond' && selectedArea.tileCalculation.bondDirection === 'vertical' ? 'course' : 'row'}</span>{tileEstimate.layoutPieces.rows.map((row, index) => <div key={row.row}><span>{selectedArea.tileCalculation.layout === 'running-bond' && selectedArea.tileCalculation.bondDirection === 'vertical' ? 'Course' : 'Row'} {index + 1}</span><strong>{row.full} whole + {row.cut} cut = {row.full + row.cut}</strong></div>)}</div>
                 {selectedCutSummaries.length > 0 && <div className="computation-rows"><span>Exact cuts and remainders</span>{selectedCutSummaries.map((cut, index) => <div key={`${cut.piece}-${index}`}><span>{cut.quantity} × {cut.piece}<small>{cut.instruction}</small></span><strong>{cut.positions.join(', ')}</strong></div>)}</div>}
                 <p>{tileEstimate.baseTiles} × {tileEstimate.wastePercent}% wastage = {tileEstimate.wasteTiles} extra</p>
                 <p>{tileEstimate.baseTiles} + {tileEstimate.wasteTiles} = {tileEstimate.materialTiles} tiles</p>
