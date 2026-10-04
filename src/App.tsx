@@ -200,12 +200,30 @@ function areaFromSquareMetres(value: number, unit: AreaUnit) {
 }
 
 function getRectUnionBoundary(rects: Rect[]) {
-  const xCoordinates = [...new Set(rects.flatMap((rect) => [rect.x, rect.x + rect.width]))].sort((first, second) => first - second)
-  const yCoordinates = [...new Set(rects.flatMap((rect) => [rect.y, rect.y + rect.height]))].sort((first, second) => first - second)
+  function mergeNearbyCoordinates(values: number[]) {
+    const groups: number[][] = []
+    const sortedValues = [...new Set(values)].sort((first, second) => first - second)
+    sortedValues.forEach((value) => {
+      const group = groups[groups.length - 1]
+      if (group && value - group[0] < 0.001) group.push(value)
+      else groups.push([value])
+    })
+    return new Map(groups.flatMap((group) => group.map((value) => [value, group[0]])))
+  }
+  const xEdges = mergeNearbyCoordinates(rects.flatMap((rect) => [rect.x, rect.x + rect.width]))
+  const yEdges = mergeNearbyCoordinates(rects.flatMap((rect) => [rect.y, rect.y + rect.height]))
+  const normalizedRects = rects.map((rect) => ({
+    left: xEdges.get(rect.x)!,
+    right: xEdges.get(rect.x + rect.width)!,
+    top: yEdges.get(rect.y)!,
+    bottom: yEdges.get(rect.y + rect.height)!,
+  }))
+  const xCoordinates = [...new Set(normalizedRects.flatMap((rect) => [rect.left, rect.right]))].sort((first, second) => first - second)
+  const yCoordinates = [...new Set(normalizedRects.flatMap((rect) => [rect.top, rect.bottom]))].sort((first, second) => first - second)
   const occupied = yCoordinates.slice(0, -1).map((y, row) => xCoordinates.slice(0, -1).map((x, column) => {
     const centerX = (x + xCoordinates[column + 1]) / 2
     const centerY = (y + yCoordinates[row + 1]) / 2
-    return rects.some((rect) => centerX > rect.x && centerX < rect.x + rect.width && centerY > rect.y && centerY < rect.y + rect.height)
+    return normalizedRects.some((rect) => centerX > rect.left && centerX < rect.right && centerY > rect.top && centerY < rect.bottom)
   }))
   const segments: string[] = []
   let perimeter = 0
@@ -743,6 +761,7 @@ function App() {
       tileWidth,
       tileHeight,
       bounds: getRectBounds(area.sections),
+      boundary: getRectUnionBoundary(area.sections),
       pattern: getTilePattern(tileWidth, tileHeight, area.tileCalculation),
     }
   })
@@ -1022,7 +1041,7 @@ function App() {
         const normalized = { ...candidate, x: Math.round(candidate.x * 1000) / 1000, y: Math.round(candidate.y * 1000) / 1000 }
         return { candidate: normalized, distance: Math.hypot(normalized.x - drag.draft.x, normalized.y - drag.draft.y) }
       })
-      .filter(({ candidate, distance }) => distance <= Math.max(tileW, tileH) * 1.5 && !others.some((section) => overlaps(candidate, section)))
+      .filter(({ candidate }) => !others.some((section) => overlaps(candidate, section)))
       .sort((first, second) => first.distance - second.distance)
     const snapped = valid.find(({ candidate }) => connected(sections.map((section) => section.id === drag.id ? candidate : section)))?.candidate
     if (snapped) {
@@ -1337,7 +1356,8 @@ function App() {
             <figcaption><strong>{item.area.name}</strong><span>{item.tileSet.name} · {displayLength(item.tileWidth, unit)} × {displayLength(item.tileHeight, unit)} {unit} · {getTileLayoutName(item.area.tileCalculation)}</span></figcaption>
             <svg viewBox={`${item.bounds.minX - item.tileWidth * 0.2} ${item.bounds.minY - item.tileHeight * 0.2} ${item.bounds.width + item.tileWidth * 0.4} ${item.bounds.height + item.tileHeight * 0.4}`} role="img" aria-label={`${item.area.name} ${getTileLayoutName(item.area.tileCalculation)} tile plan`}>
               <defs><pattern id={`receipt-grid-${item.area.id}`} width={item.pattern.width} height={item.pattern.height} patternUnits="userSpaceOnUse" patternTransform={item.pattern.transform}><path d={item.pattern.path} fill="none" stroke="#111" strokeWidth={Math.max(item.tileWidth, item.tileHeight) * 0.012} /></pattern></defs>
-              {item.area.sections.map((section) => <g key={section.id}><rect x={section.x} y={section.y} width={section.width} height={section.height} fill={`url(#receipt-grid-${item.area.id})`} stroke="#111" strokeWidth={Math.max(item.tileWidth, item.tileHeight) * 0.025} /></g>)}
+              {item.area.sections.map((section) => <g key={section.id}><rect x={section.x} y={section.y} width={section.width} height={section.height} fill={`url(#receipt-grid-${item.area.id})`} /></g>)}
+              <path d={item.boundary.path} fill="none" stroke="#111" strokeWidth={Math.max(item.tileWidth, item.tileHeight) * 0.025} />
             </svg>
             <p>Room: {item.area.sections.map((section, index) => `Section ${index + 1} ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}. Tile: {displayLength(item.tileWidth, unit)} × {displayLength(item.tileHeight, unit)} {unit}. Layout: {getTileLayoutName(item.area.tileCalculation)}.</p>
           </figure>)}
