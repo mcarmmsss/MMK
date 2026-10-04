@@ -31,7 +31,7 @@ type TileCutPlan = { row: number; column: number; stockTile: number; sourceWidth
 type TilePieceCount = { total: number; full: number; cut: number; cutArea: number; cuts: TileCut[]; rows: TileRowCount[]; approximate: boolean }
 type Opening = { id: number; count: number; width: number; height: number }
 type PaintSettings = { source: PaintSource; manualArea: number; manualUnit: AreaUnit; wallHeight: number; openings: Opening[]; openingArea: number; openingAreaUnit: AreaUnit; coats: number; volume: PaintVolume; unitPrice: number; includeCeiling?: boolean }
-type PaintProduct = { id: string; name: string; surface: 'wall' | 'ceiling'; coats: number; volume: PaintVolume; coverageArea: number; unitPrice: number }
+type PaintProduct = { id: string; name: string; surface: 'wall' | 'ceiling'; source?: PaintSource; manualArea?: number; manualUnit?: AreaUnit; coats: number; volume: PaintVolume; coverageArea: number; unitPrice: number }
 type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; bondDirection: BondDirection; customBondOffset: number; reuseCutTiles: boolean }
 type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number; boxContentMode: 'tiles' | 'area'; coveragePerBox: number; coverageUnit: AreaUnit }
 type Area = { id: number; name: string; tileSetId: string; sections: Rect[]; paint: PaintSettings; paintProducts: PaintProduct[]; tileCalculation: TileCalculation }
@@ -58,7 +58,7 @@ function createPaintSettings(): PaintSettings {
 }
 
 function createPaintProduct(name = 'Paint 1', settings = createPaintSettings()): PaintProduct {
-  return { id: createId(), name, surface: 'wall', coats: settings.coats, volume: settings.volume, coverageArea: settings.volume === 'litres' ? 6.25 : 25, unitPrice: settings.unitPrice }
+  return { id: createId(), name, surface: 'wall', source: settings.source, manualArea: settings.manualArea, manualUnit: settings.manualUnit, coats: settings.coats, volume: settings.volume, coverageArea: settings.volume === 'litres' ? 6.25 : 25, unitPrice: settings.unitPrice }
 }
 
 function createTileCalculation(): TileCalculation {
@@ -107,6 +107,9 @@ function isProjectBackup(value: unknown): value is ProjectBackup {
       const validPaintProducts = area.paintProducts === undefined || (Array.isArray(area.paintProducts) && area.paintProducts.length > 0 &&
         area.paintProducts.every((product) => isRecord(product) && typeof product.id === 'string' && typeof product.name === 'string' &&
           (product.surface === undefined || product.surface === 'wall' || product.surface === 'ceiling') &&
+          (product.source === undefined || product.source === 'outline' || product.source === 'manual') &&
+          (product.manualArea === undefined || isFiniteNumber(product.manualArea)) &&
+          (product.manualUnit === undefined || product.manualUnit === 'm2' || product.manualUnit === 'ft2') &&
           isFiniteNumber(product.coats) && product.coats >= 1 && (product.volume === 'litres' || product.volume === 'gallons') &&
           isFiniteNumber(product.coverageArea) && product.coverageArea > 0 && isFiniteNumber(product.unitPrice)))
       const calculation = area.tileCalculation
@@ -126,6 +129,9 @@ function normalizePaintProducts(products: PaintProduct[] | undefined, paint: Pai
     id: product.id,
     name: 'color' in product && typeof product.color === 'string' && product.color ? product.color : product.name,
     surface: product.surface ?? 'wall',
+    source: product.source ?? paint.source,
+    manualArea: product.manualArea ?? paint.manualArea,
+    manualUnit: product.manualUnit ?? paint.manualUnit,
     coats: product.coats,
     volume: product.volume,
     coverageArea: product.coverageArea,
@@ -292,9 +298,12 @@ function outlinePerimeter(rects: Rect[]) {
 }
 
 function calculatePaint(sections: Rect[], paint: PaintSettings, product: PaintProduct) {
+  const source = product.source ?? paint.source
   const outlineArea = outlinePerimeter(sections) * 0.0254 * paint.wallHeight * 0.0254
-  const surfaceArea = paint.source === 'manual'
-    ? areaToSquareMetres(paint.manualArea, paint.manualUnit)
+  const manualArea = product.manualArea ?? paint.manualArea
+  const manualUnit = product.manualUnit ?? paint.manualUnit
+  const surfaceArea = source === 'manual'
+    ? areaToSquareMetres(manualArea, manualUnit)
     : product.surface === 'wall'
       ? outlineArea
       : getRectUnionBoundary(sections).area * 0.0254 ** 2
@@ -303,7 +312,7 @@ function calculatePaint(sections: Rect[], paint: PaintSettings, product: PaintPr
   const countedOpenings = paint.openings.reduce((total, opening) => total + opening.count * opening.width * opening.height * 0.0254 ** 2, 0)
   const directOpeningArea = areaToSquareMetres(paint.openingArea, paint.openingAreaUnit)
   const grossArea = surfaceArea
-  const deductions = product.surface === 'wall' && paint.source === 'outline' ? countedOpenings + directOpeningArea : 0
+  const deductions = product.surface === 'wall' && source === 'outline' ? countedOpenings + directOpeningArea : 0
   const netArea = Math.max(0, grossArea - deductions)
   const coats = Math.max(1, product.coats)
   const rawQuantity = netArea * coats / product.coverageArea
@@ -1416,9 +1425,9 @@ function App() {
           </div>
           <div className="paint-field-group">
             <span className="field-caption">Painted area source</span>
-            <div className="segmented-control source-toggle"><button className={selectedArea.paint.source === 'outline' ? 'active' : ''} type="button" aria-pressed={selectedArea.paint.source === 'outline'} onClick={() => updatePaint((paint) => ({ ...paint, source: 'outline' }))}>{selectedPaint.surface === 'wall' ? 'Canvas outline' : 'Canvas plan'}</button><button className={selectedArea.paint.source === 'manual' ? 'active' : ''} type="button" aria-pressed={selectedArea.paint.source === 'manual'} onClick={() => updatePaint((paint) => ({ ...paint, source: 'manual' }))}>Manual area</button></div>
+            <div className="segmented-control source-toggle"><button className={selectedPaint.source !== 'manual' ? 'active' : ''} type="button" aria-pressed={selectedPaint.source !== 'manual'} onClick={() => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, source: 'outline' }))}>{selectedPaint.surface === 'wall' ? 'Canvas outline' : 'Canvas plan'}</button><button className={selectedPaint.source === 'manual' ? 'active' : ''} type="button" aria-pressed={selectedPaint.source === 'manual'} onClick={() => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, source: 'manual' }))}>Manual area</button></div>
           </div>
-          {selectedArea.paint.source === 'outline' ? <>
+          {selectedPaint.source !== 'manual' ? <>
             <div className="paint-outline-summary"><span>{selectedPaint.surface === 'wall' ? 'Outer wall · shared edges excluded' : 'Combined ceiling area'}</span><strong>{selectedPaint.surface === 'wall' ? `${(sectionBoundary.perimeter * 0.0254).toFixed(2)} m perimeter` : `${paintEstimate.ceilingArea.toFixed(2)} m² area`}</strong></div>
             {selectedPaint.surface === 'wall' && <label className="paint-field"><span>Wall height</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(selectedArea.paint.wallHeight, unit))} onValueChange={(value) => {
               if (value > 0) updatePaint((paint) => ({ ...paint, wallHeight: toInches(value, unit) }))
@@ -1437,7 +1446,7 @@ function App() {
             </div>)}
             <label className="paint-field"><span>Additional opening area</span><div className="area-input-pair"><span className="input-wrap"><NumericInput min="0" step="0.1" value={selectedArea.paint.openingArea} onValueChange={(value) => updatePaint((paint) => ({ ...paint, openingArea: Math.max(0, value) }))} /><small>{selectedArea.paint.openingAreaUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Additional opening area units" value={selectedArea.paint.openingAreaUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, openingAreaUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>
             </>}
-          </> : <label className="paint-field"><span>{selectedPaint.surface === 'wall' ? 'Wall area' : 'Ceiling area'}</span><div className="area-input-pair"><span className="input-wrap"><NumericInput min="0" step="0.1" value={selectedArea.paint.manualArea} onValueChange={(value) => updatePaint((paint) => ({ ...paint, manualArea: Math.max(0, value) }))} /><small>{selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Painted area units" value={selectedArea.paint.manualUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, manualUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>}
+          </> : <label className="paint-field"><span>{selectedPaint.surface === 'wall' ? 'Wall area' : 'Ceiling area'}</span><div className="area-input-pair"><span className="input-wrap"><NumericInput min="0" step="0.1" value={selectedPaint.manualArea ?? selectedArea.paint.manualArea} onValueChange={(value) => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, manualArea: Math.max(0, value) }))} /><small>{(selectedPaint.manualUnit ?? selectedArea.paint.manualUnit) === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Painted area units" value={selectedPaint.manualUnit ?? selectedArea.paint.manualUnit} onChange={(event) => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, manualUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>}
           <div className="paint-final-fields">
             <label className="paint-field"><span>Coats</span><span className="input-wrap"><NumericInput min="1" step="1" value={selectedPaint.coats} onValueChange={(value) => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, coats: Math.max(1, Math.floor(value)) }))} /><small>coats</small></span></label>
             <label className="paint-field"><span>Coverage per {selectedPaint.volume === 'litres' ? 'L' : 'gallon'}</span><span className="input-wrap"><NumericInput min="0.01" step="0.1" value={selectedPaint.coverageArea} onValueChange={(value) => updatePaintProduct(selectedPaint.id, (product) => ({ ...product, coverageArea: Math.max(0.01, value) }))} /><small>m²</small></span></label>
@@ -1450,7 +1459,7 @@ function App() {
           <h2>{selectedPaint.name || 'Untitled paint'}</h2>
           <p className="paint-summary-color">{selectedArea.name} · {selectedPaint.surface === 'wall' ? 'Wall paint' : 'Ceiling paint'}</p>
           <div className="paint-summary-area"><span>{selectedPaint.surface === 'wall' ? 'Wall area' : 'Ceiling area'}</span><strong>{paintEstimate.netArea.toFixed(2)} m²</strong><small>{areaFromSquareMetres(paintEstimate.netArea, 'ft2').toFixed(2)} ft²</small></div>
-          {selectedArea.paint.source === 'outline' && <div className="paint-summary-lines">
+          {selectedPaint.source !== 'manual' && <div className="paint-summary-lines">
             <div><span>{selectedPaint.surface === 'wall' ? 'Wall area' : 'Ceiling area'}</span><strong>{paintEstimate.netArea.toFixed(2)} m²</strong></div>
             {selectedPaint.surface === 'wall' && <div><span>Wall openings</span><strong>−{paintEstimate.deductions.toFixed(2)} m²</strong></div>}
           </div>}
@@ -1460,9 +1469,9 @@ function App() {
           <div className="live-computation paint-computation">
             <button className="computation-toggle" type="button" onClick={() => setShowPaintComputation((visible) => !visible)} aria-expanded={showPaintComputation}><img src={showPaintComputation ? hideIcon : viewIcon} alt="" /><span>{showPaintComputation ? 'Hide computation' : 'Show computation'}</span></button>
             {showPaintComputation && <div className="computation-details" aria-live="polite">
-              {selectedArea.paint.source === 'manual' ? <>
-                <div><span>Entered {selectedPaint.surface} area</span><strong>{selectedArea.paint.manualArea.toFixed(2)} {selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'}</strong></div>
-                <p>{selectedArea.paint.manualArea.toFixed(2)} {selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'} = {paintEstimate.netArea.toFixed(2)} m² {selectedPaint.surface}</p>
+              {selectedPaint.source === 'manual' ? <>
+                <div><span>Entered {selectedPaint.surface} area</span><strong>{(selectedPaint.manualArea ?? selectedArea.paint.manualArea).toFixed(2)} {(selectedPaint.manualUnit ?? selectedArea.paint.manualUnit) === 'm2' ? 'm²' : 'ft²'}</strong></div>
+                <p>{(selectedPaint.manualArea ?? selectedArea.paint.manualArea).toFixed(2)} {(selectedPaint.manualUnit ?? selectedArea.paint.manualUnit) === 'm2' ? 'm²' : 'ft²'} = {paintEstimate.netArea.toFixed(2)} m² {selectedPaint.surface}</p>
               </> : <>
                 {selectedPaint.surface === 'wall'
                   ? <>
@@ -1513,7 +1522,7 @@ function App() {
         <h2>Tile set totals</h2>
         <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste (qty / %)</th><th>Total</th><th>Purchase</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)} / {wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes / ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]}` : `${boxes} boxes / ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
         <h2>Paint by area</h2>
-        <table><thead><tr><th>Area</th><th>Paint name</th><th>Surface</th><th>Area source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={`${item.area.id}-${item.product.id}`}><td>{item.area.name}</td><td>{item.product.name}</td><td>{item.product.surface === 'wall' ? 'Wall' : 'Ceiling'}</td><td>{item.area.paint.source === 'outline' ? 'Canvas' : 'Manual'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity} {item.product.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Area</th><th>Paint name</th><th>Surface</th><th>Area source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={`${item.area.id}-${item.product.id}`}><td>{item.area.name}</td><td>{item.product.name}</td><td>{item.product.surface === 'wall' ? 'Wall' : 'Ceiling'}</td><td>{item.product.source === 'manual' ? 'Manual' : 'Canvas'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity} {item.product.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
       </section>
       {calculatorOpen
