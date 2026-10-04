@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import addIcon from '../SVG/Add_ring_fill.svg'
 import moneyIcon from '../SVG/philippine-peso.svg'
 import moveIcon from '../SVG/move.svg'
@@ -42,11 +42,11 @@ function createId() {
 }
 
 function createTileSet(name = 'Tile set 1'): TileSet {
-  return { id: createId(), name, width: 12, height: 12, rotated: false, wasteOn: false, wastePercent: 10, priceOpen: false, priceMode: 'tile', unitPrice: 0, tilesPerBox: 8 }
+  return { id: createId(), name, width: 30 / 2.54, height: 30 / 2.54, rotated: false, wasteOn: false, wastePercent: 10, priceOpen: false, priceMode: 'tile', unitPrice: 0, tilesPerBox: 8 }
 }
 
 function createPaintSettings(): PaintSettings {
-  return { source: 'outline', manualArea: 25, manualUnit: 'm2', wallHeight: 96, openings: [], openingArea: 0, openingAreaUnit: 'm2', coats: 1, volume: 'litres', unitPrice: 0 }
+  return { source: 'outline', manualArea: 25, manualUnit: 'm2', wallHeight: 240 / 2.54, openings: [], openingArea: 0, openingAreaUnit: 'm2', coats: 1, volume: 'litres', unitPrice: 0 }
 }
 
 function createTileCalculation(): TileCalculation {
@@ -55,7 +55,34 @@ function createTileCalculation(): TileCalculation {
 
 function createProject(name = 'Untitled project'): Project {
   const tileSet = createTileSet()
-  return { id: createId(), name, areas: [{ id: 1, name: 'Area 1', tileSetId: tileSet.id, sections: [{ id: 1, x: 0, y: 0, width: 144, height: 120 }], paint: createPaintSettings(), tileCalculation: createTileCalculation() }], tileSets: [tileSet] }
+  return { id: createId(), name, areas: [{ id: 1, name: 'Area 1', tileSetId: tileSet.id, sections: [{ id: 1, x: 0, y: 0, width: 400 / 2.54, height: 300 / 2.54 }], paint: createPaintSettings(), tileCalculation: createTileCalculation() }], tileSets: [tileSet] }
+}
+
+type NumericInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'onChange'> & {
+  value: number
+  onValueChange: (value: number) => void
+}
+
+function NumericInput({ value, onValueChange, ...props }: NumericInputProps) {
+  const [draft, setDraft] = useState(String(value))
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (document.activeElement !== inputRef.current) setDraft(String(value))
+  }, [value])
+
+  return <input
+    {...props}
+    ref={inputRef}
+    type="number"
+    value={draft}
+    onChange={(event) => {
+      const next = event.target.value
+      setDraft(next)
+      if (next !== '' && Number.isFinite(Number(next))) onValueChange(Number(next))
+    }}
+    onBlur={() => setDraft(String(value))}
+  />
 }
 
 function loadProjects(): Project[] {
@@ -373,8 +400,8 @@ function App() {
   const [selectedId, setSelectedId] = useState(1)
   const [attachSide, setAttachSide] = useState<Side>('east')
   const [alignment, setAlignment] = useState<Alignment>('start')
-  const [newWidth, setNewWidth] = useState(() => Number(fromInches(toInches(6, 'ft'), defaultUnit).toFixed(2)))
-  const [newHeight, setNewHeight] = useState(() => Number(fromInches(toInches(4, 'ft'), defaultUnit).toFixed(2)))
+  const [newWidth, setNewWidth] = useState(200)
+  const [newHeight, setNewHeight] = useState(120)
   const [notice, setNotice] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
 
@@ -537,7 +564,7 @@ function App() {
   }
 
   function addOpening() {
-    updatePaint((paint) => ({ ...paint, openings: [...paint.openings, { id: Math.max(0, ...paint.openings.map((opening) => opening.id)) + 1, count: 1, width: 36, height: 80 }] }))
+    updatePaint((paint) => ({ ...paint, openings: [...paint.openings, { id: Math.max(0, ...paint.openings.map((opening) => opening.id)) + 1, count: 1, width: 90 / 2.54, height: 200 / 2.54 }] }))
   }
 
   function removeOpening(id: number) {
@@ -701,9 +728,9 @@ function App() {
                   <button className="area-edit-button" type="button" onClick={() => selectArea(area)}>Edit area</button>
                   {area.id === selectedArea.id && <div className="section-dimensions">
                     {sections.map((section, sectionIndex) => <div className="dimension-pair" key={section.id}>
-                      <label><span>{sectionIndex === 0 ? 'Width' : `Section ${sectionIndex + 1} width`}</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(section.width, unit)} onChange={(event) => updateSection(section.id, 'width', Number(event.target.value))} /><small>{unit}</small></span></label>
+                      <label><span>{sectionIndex === 0 ? 'Width' : `Section ${sectionIndex + 1} width`}</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(section.width, unit))} onValueChange={(value) => updateSection(section.id, 'width', value)} /><small>{unit}</small></span></label>
                       <span className="dimension-times">×</span>
-                      <label><span>Length</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(section.height, unit)} onChange={(event) => updateSection(section.id, 'height', Number(event.target.value))} /><small>{unit}</small></span></label>
+                      <label><span>Length</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(section.height, unit))} onValueChange={(value) => updateSection(section.id, 'height', value)} /><small>{unit}</small></span></label>
                       {sections.length > 1 && <button className="remove-subsection" type="button" onClick={() => removeSection(section.id)} aria-label={`Remove section ${sectionIndex + 1}`}><img src={trashIcon} alt="" /></button>}
                     </div>)}
                   </div>}
@@ -714,9 +741,9 @@ function App() {
             <div className="attach-box">
               <div className="attach-title"><img src={addIcon} alt="" /><span>Add a section to {selectedArea.name}</span></div>
               <div className="attach-dimensions">
-                <label><span>Width</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={newWidth} onChange={(event) => setNewWidth(Number(event.target.value))} /><small>{unit}</small></span></label>
+                <label><span>Width</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={newWidth} onValueChange={setNewWidth} /><small>{unit}</small></span></label>
                 <span className="dimension-times">×</span>
-                <label><span>Length</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={newHeight} onChange={(event) => setNewHeight(Number(event.target.value))} /><small>{unit}</small></span></label>
+                <label><span>Length</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={newHeight} onValueChange={setNewHeight} /><small>{unit}</small></span></label>
               </div>
               <div className="attach-options">
                 <label><span>Attach to</span><select value={attachSide} onChange={(event) => setAttachSide(event.target.value as Side)}><option value="north">North edge</option><option value="east">East edge</option><option value="south">South edge</option><option value="west">West edge</option></select></label>
@@ -733,7 +760,7 @@ function App() {
             <div className="segmented-control calculation-mode"><button className={selectedArea.tileCalculation.mode === 'layout' ? 'active' : ''} type="button" aria-pressed={selectedArea.tileCalculation.mode === 'layout'} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, mode: 'layout' }))}>Placement</button><button className={selectedArea.tileCalculation.mode === 'simple' ? 'active' : ''} type="button" aria-pressed={selectedArea.tileCalculation.mode === 'simple'} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, mode: 'simple' }))}>Simple area</button></div>
             {selectedArea.tileCalculation.mode === 'layout' && <>
               <label className="tile-layout-select"><span>Placement layout</span><select value={selectedArea.tileCalculation.layout} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, layout: event.target.value as TileLayout }))}><option value="straight">Straight / grid</option><option value="running-bond">Running bond</option><option value="diagonal">Diagonal</option><option value="herringbone">Herringbone</option></select></label>
-              {selectedArea.tileCalculation.layout === 'running-bond' && <div className="bond-offset-fields"><label className="tile-layout-select"><span>Row offset</span><select value={selectedArea.tileCalculation.bondOffsetMode} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondOffsetMode: event.target.value as BondOffsetMode }))}><option value="half">Half tile</option><option value="third">Third tile</option><option value="custom">Custom fraction</option></select></label>{selectedArea.tileCalculation.bondOffsetMode === 'custom' && <label className="tile-layout-select"><span>Offset of tile width</span><span className="input-wrap"><input type="number" min="5" max="95" step="1" value={Math.round(selectedArea.tileCalculation.customBondOffset * 100)} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, customBondOffset: Math.min(0.95, Math.max(0.05, Number(event.target.value) / 100)) }))} /><small>%</small></span></label>}</div>}
+              {selectedArea.tileCalculation.layout === 'running-bond' && <div className="bond-offset-fields"><label className="tile-layout-select"><span>Row offset</span><select value={selectedArea.tileCalculation.bondOffsetMode} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondOffsetMode: event.target.value as BondOffsetMode }))}><option value="half">Half tile</option><option value="third">Third tile</option><option value="custom">Custom fraction</option></select></label>{selectedArea.tileCalculation.bondOffsetMode === 'custom' && <label className="tile-layout-select"><span>Offset of tile width</span><span className="input-wrap"><NumericInput min="5" max="95" step="1" value={Math.round(selectedArea.tileCalculation.customBondOffset * 100)} onValueChange={(value) => updateTileCalculation((calculation) => ({ ...calculation, customBondOffset: Math.min(0.95, Math.max(0.05, value / 100)) }))} /><small>%</small></span></label>}</div>}
               {selectedArea.tileCalculation.layout === 'herringbone' && <p className="section-description layout-note">A 2:1 tile proportion gives the standard herringbone pattern. Other proportions use an approximate count.</p>}
             </>}
           </section>
@@ -745,9 +772,9 @@ function App() {
             <p className="tile-set-assignment">Assigned to {activeProject.areas.filter((area) => area.tileSetId === editingTileSet.id).map((area) => area.name).join(', ') || 'no areas'}</p>
             <div className="section-heading tile-settings-heading"><span className="tile-settings-label">Tile dimensions</span><button className={`icon-control rotate-control ${editingTileSet.rotated ? 'is-active' : ''}`} type="button" onClick={() => updateEditingTileSet((tileSet) => ({ ...tileSet, rotated: !tileSet.rotated }))} aria-label="Rotate tile layout" title="Rotate tile layout"><img src={rotateIcon} alt="" /></button></div>
             <div className="tile-inputs">
-              <label><span>Width</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(editingTileSet.width, unit)} onChange={(event) => updateEditingTileSet((tileSet) => ({ ...tileSet, width: toInches(Number(event.target.value), unit) }))} /><small>{unit}</small></span></label>
+              <label><span>Width</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(editingTileSet.width, unit))} onValueChange={(value) => updateEditingTileSet((tileSet) => ({ ...tileSet, width: toInches(value, unit) }))} /><small>{unit}</small></span></label>
               <span className="dimension-times">×</span>
-              <label><span>Length</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(editingTileSet.height, unit)} onChange={(event) => updateEditingTileSet((tileSet) => ({ ...tileSet, height: toInches(Number(event.target.value), unit) }))} /><small>{unit}</small></span></label>
+              <label><span>Length</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(editingTileSet.height, unit))} onValueChange={(value) => updateEditingTileSet((tileSet) => ({ ...tileSet, height: toInches(value, unit) }))} /><small>{unit}</small></span></label>
             </div>
             <div className="tile-swatch-row"><span className="tile-swatch" style={{ aspectRatio: `${editingWidth} / ${editingHeight}` }} /><span>{editingTileSet.rotated ? 'Rotated' : 'Default orientation'}</span><span className="tile-unit-note">{displayLength(editingWidth, unit)} × {displayLength(editingHeight, unit)} {unit}</span></div>
           </section>
@@ -755,7 +782,7 @@ function App() {
           <section className="control-section waste-section">
             <div className="section-heading"><div><span className="step-index">04</span><h2>Wastage</h2></div><button className={`switch ${editingTileSet.wasteOn ? 'is-on' : ''}`} type="button" role="switch" aria-checked={editingTileSet.wasteOn} aria-label="Include wastage" onClick={() => updateEditingTileSet((tileSet) => ({ ...tileSet, wasteOn: !tileSet.wasteOn }))}><span /></button></div>
             <p className="section-description">Percentage added to the base tile count.</p>
-            {editingTileSet.wasteOn && <label className="waste-input"><span><img src={percentIcon} alt="" /> Wastage</span><span className="input-wrap"><input type="number" min="0" max="100" step="1" value={editingTileSet.wastePercent} onChange={(event) => updateEditingTileSet((tileSet) => ({ ...tileSet, wastePercent: Math.min(100, Math.max(0, Number(event.target.value))) }))} /><small>%</small></span></label>}
+            {editingTileSet.wasteOn && <label className="waste-input"><span><img src={percentIcon} alt="" /> Wastage</span><span className="input-wrap"><NumericInput min="0" max="100" step="1" value={editingTileSet.wastePercent} onValueChange={(value) => updateEditingTileSet((tileSet) => ({ ...tileSet, wastePercent: Math.min(100, Math.max(0, value)) }))} /><small>%</small></span></label>}
           </section>
         </aside>
 
@@ -815,8 +842,8 @@ function App() {
           {assignedTileSet.priceOpen && <div className="price-panel">
             <div className="price-panel-heading"><div><img src={packageIcon} alt="" /><span>Sold by</span></div><div className="segmented-control"><button className={assignedTileSet.priceMode === 'tile' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, priceMode: 'tile' }))}>Tile</button><button className={assignedTileSet.priceMode === 'box' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, priceMode: 'box' }))}>Box</button></div></div>
             <div className="price-fields">
-              <label><span>Price per {assignedTileSet.priceMode}</span><span className="currency-input"><span>₱</span><input type="number" min="0" step="0.01" value={assignedTileSet.unitPrice} onChange={(event) => updateAssignedTileSet((tileSet) => ({ ...tileSet, unitPrice: Math.max(0, Number(event.target.value)) }))} /></span></label>
-              {assignedTileSet.priceMode === 'box' && <label><span>Tiles per box</span><span className="input-wrap"><input type="number" min="1" step="1" value={assignedTileSet.tilesPerBox} onChange={(event) => updateAssignedTileSet((tileSet) => ({ ...tileSet, tilesPerBox: Math.max(1, Number(event.target.value)) }))} /><small>tiles</small></span></label>}
+              <label><span>Price per {assignedTileSet.priceMode}</span><span className="currency-input"><span>₱</span><NumericInput min="0" step="0.01" value={assignedTileSet.unitPrice} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, unitPrice: Math.max(0, value) }))} /></span></label>
+              {assignedTileSet.priceMode === 'box' && <label><span>Tiles per box</span><span className="input-wrap"><NumericInput min="1" step="1" value={assignedTileSet.tilesPerBox} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, tilesPerBox: Math.max(1, value) }))} /><small>tiles</small></span></label>}
             </div>
             <div className="price-result"><span>{assignedTileSet.priceMode === 'box' ? `${boxCount} ${boxCount === 1 ? 'box' : 'boxes'} · ${boxCount * assignedTileSet.tilesPerBox} tiles` : `${materialTiles.toLocaleString()} tiles`}</span><strong>{formatMoney(priceTotal)}</strong></div>
           </div>}
@@ -836,28 +863,25 @@ function App() {
           </div>
           {selectedArea.paint.source === 'outline' ? <>
             <div className="paint-outline-summary"><span>Wall outline from {sections.length} {sections.length === 1 ? 'section' : 'sections'}</span><strong>{(outlinePerimeter(sections) * 0.0254).toFixed(2)} m perimeter</strong></div>
-            <label className="paint-field"><span>Wall height</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(selectedArea.paint.wallHeight, unit)} onChange={(event) => {
-              const value = Number(event.target.value)
+            <label className="paint-field"><span>Wall height</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(selectedArea.paint.wallHeight, unit))} onValueChange={(value) => {
               if (value > 0) updatePaint((paint) => ({ ...paint, wallHeight: toInches(value, unit) }))
             }} /><small>{unit}</small></span></label>
             <div className="opening-heading"><span>Openings to subtract</span><button className="new-tile-set-button" type="button" onClick={addOpening}><img src={addIcon} alt="" /> Add opening</button></div>
             {selectedArea.paint.openings.map((opening, index) => <div className="opening-row" key={opening.id}>
-              <label><span>Count</span><span className="input-wrap"><input type="number" min="0" step="1" value={opening.count} onChange={(event) => updateOpening(opening.id, (current) => ({ ...current, count: Math.max(0, Math.floor(Number(event.target.value) || 0)) }))} /><small>×</small></span></label>
-              <label><span>Width</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(opening.width, unit)} onChange={(event) => {
-                const value = Number(event.target.value)
+              <label><span>Count</span><span className="input-wrap"><NumericInput min="0" step="1" value={opening.count} onValueChange={(value) => updateOpening(opening.id, (current) => ({ ...current, count: Math.max(0, Math.floor(value)) }))} /><small>×</small></span></label>
+              <label><span>Width</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(opening.width, unit))} onValueChange={(value) => {
                 if (value > 0) updateOpening(opening.id, (current) => ({ ...current, width: toInches(value, unit) }))
               }} /><small>{unit}</small></span></label>
-              <label><span>Height</span><span className="input-wrap"><input type="number" min="0.1" step="0.1" value={displayLength(opening.height, unit)} onChange={(event) => {
-                const value = Number(event.target.value)
+              <label><span>Height</span><span className="input-wrap"><NumericInput min="0.1" step="0.1" value={Number(displayLength(opening.height, unit))} onValueChange={(value) => {
                 if (value > 0) updateOpening(opening.id, (current) => ({ ...current, height: toInches(value, unit) }))
               }} /><small>{unit}</small></span></label>
               <button className="remove-subsection" type="button" onClick={() => removeOpening(opening.id)} aria-label={`Remove opening ${index + 1}`}><img src={trashIcon} alt="" /></button>
             </div>)}
-            <label className="paint-field"><span>Additional opening area</span><div className="area-input-pair"><span className="input-wrap"><input type="number" min="0" step="0.1" value={selectedArea.paint.openingArea} onChange={(event) => updatePaint((paint) => ({ ...paint, openingArea: Math.max(0, Number(event.target.value) || 0) }))} /><small>{selectedArea.paint.openingAreaUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Additional opening area units" value={selectedArea.paint.openingAreaUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, openingAreaUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>
-          </> : <label className="paint-field"><span>Painted area</span><div className="area-input-pair"><span className="input-wrap"><input type="number" min="0" step="0.1" value={selectedArea.paint.manualArea} onChange={(event) => updatePaint((paint) => ({ ...paint, manualArea: Math.max(0, Number(event.target.value) || 0) }))} /><small>{selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Painted area units" value={selectedArea.paint.manualUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, manualUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>}
+            <label className="paint-field"><span>Additional opening area</span><div className="area-input-pair"><span className="input-wrap"><NumericInput min="0" step="0.1" value={selectedArea.paint.openingArea} onValueChange={(value) => updatePaint((paint) => ({ ...paint, openingArea: Math.max(0, value) }))} /><small>{selectedArea.paint.openingAreaUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Additional opening area units" value={selectedArea.paint.openingAreaUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, openingAreaUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>
+          </> : <label className="paint-field"><span>Painted area</span><div className="area-input-pair"><span className="input-wrap"><NumericInput min="0" step="0.1" value={selectedArea.paint.manualArea} onValueChange={(value) => updatePaint((paint) => ({ ...paint, manualArea: Math.max(0, value) }))} /><small>{selectedArea.paint.manualUnit === 'm2' ? 'm²' : 'ft²'}</small></span><select aria-label="Painted area units" value={selectedArea.paint.manualUnit} onChange={(event) => updatePaint((paint) => ({ ...paint, manualUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>}
           <div className="paint-final-fields">
-            <label className="paint-field"><span>Coats</span><span className="input-wrap"><input type="number" min="1" step="1" value={selectedArea.paint.coats} onChange={(event) => updatePaint((paint) => ({ ...paint, coats: Math.max(1, Math.floor(Number(event.target.value) || 1)) }))} /><small>coats</small></span></label>
-            <label className="paint-field"><span>Price per {selectedArea.paint.volume === 'litres' ? 'L' : 'gallon'}</span><span className="currency-input"><span>₱</span><input type="number" min="0" step="0.01" value={selectedArea.paint.unitPrice} onChange={(event) => updatePaint((paint) => ({ ...paint, unitPrice: Math.max(0, Number(event.target.value) || 0) }))} /></span></label>
+            <label className="paint-field"><span>Coats</span><span className="input-wrap"><NumericInput min="1" step="1" value={selectedArea.paint.coats} onValueChange={(value) => updatePaint((paint) => ({ ...paint, coats: Math.max(1, Math.floor(value)) }))} /><small>coats</small></span></label>
+            <label className="paint-field"><span>Price per {selectedArea.paint.volume === 'litres' ? 'L' : 'gallon'}</span><span className="currency-input"><span>₱</span><NumericInput min="0" step="0.01" value={selectedArea.paint.unitPrice} onValueChange={(value) => updatePaint((paint) => ({ ...paint, unitPrice: Math.max(0, value) }))} /></span></label>
           </div>
           <div className="paint-volume-row"><span>Quantity in</span><div className="segmented-control"><button className={selectedArea.paint.volume === 'litres' ? 'active' : ''} type="button" onClick={() => updatePaint((paint) => ({ ...paint, volume: 'litres' }))}>Litres</button><button className={selectedArea.paint.volume === 'gallons' ? 'active' : ''} type="button" onClick={() => updatePaint((paint) => ({ ...paint, volume: 'gallons' }))}>Gallons</button></div></div>
         </div>
