@@ -9,6 +9,8 @@ import trashIcon from '../SVG/Trash.svg'
 import downloadIcon from '../SVG/Download_circle_fill.svg'
 import viewIcon from '../SVG/View.svg'
 import hideIcon from '../SVG/View_hide.svg'
+import Calculator from './Calculator'
+import { evaluateArithmeticExpression } from './mathExpression'
 import './App.css'
 
 type Unit = 'ft' | 'in' | 'cm' | 'mm'
@@ -135,14 +137,20 @@ function NumericInput({ value, onValueChange, ...props }: NumericInputProps) {
   return <input
     {...props}
     ref={inputRef}
-    type="number"
+    type="text"
+    inputMode="text"
     value={draft}
     onChange={(event) => {
       const next = event.target.value
       setDraft(next)
-      if (next !== '' && Number.isFinite(Number(next))) onValueChange(Number(next))
+      const result = evaluateArithmeticExpression(next)
+      if (next.trim() && result !== null) onValueChange(result)
     }}
-    onBlur={() => setDraft(String(value))}
+    onBlur={() => {
+      const result = evaluateArithmeticExpression(draft)
+      if (draft.trim() && result !== null) onValueChange(result)
+      setDraft(String(value))
+    }}
   />
 }
 
@@ -466,6 +474,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [drag, setDrag] = useState<DragState | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
+  const [calculatorOpen, setCalculatorOpen] = useState(true)
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(projects))
@@ -799,7 +808,7 @@ function App() {
   const formatMoney = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${calculatorOpen ? 'has-calculator' : ''}`}>
       <header className="topbar">
         <a className="brand" href="#top" aria-label="Material Measuring Kit home">
           <span className="brand-mark"><span /></span>
@@ -1050,6 +1059,9 @@ function App() {
         <table><thead><tr><th>Area</th><th>Source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.paint.source === 'outline' ? 'Canvas outline' : 'Manual area'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity.toFixed(2)} {item.area.paint.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
       </section>
+      {calculatorOpen
+        ? <Calculator onHide={() => setCalculatorOpen(false)} />
+        : <button className="calculator-reopen" type="button" onClick={() => setCalculatorOpen(true)}>Calculator</button>}
     </main>
   )
 }
