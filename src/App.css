@@ -36,6 +36,8 @@
 .project-name-input:focus { border-color: #73614f; }
 .receipt-button { min-height: 38px; padding: 0 12px; font-size: 11px; }
 .receipt-button img { width: 18px; height: 18px; }
+.receipt-actions { display: flex; align-items: center; gap: 13px; }
+.receipt-plan-toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
 .project-stamp > span { color: var(--quiet); }
 .project-stamp strong { color: var(--paper); font-size: 13px; font-weight: 500; }
 .stamp-line { width: 37px; height: 2px; background: var(--tan); margin-top: 3px; }
@@ -110,6 +112,8 @@
 .layout-note { margin: 10px 0 0; }
 .tile-settings-heading { margin: 0 0 10px; }
 .tile-settings-label { color: var(--muted); font-size: 11px; }
+.reuse-control { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 15px; color: var(--muted); font-size: 11px; }
+.reuse-control p { margin: 5px 0 0; color: var(--quiet); font-size: 10px; line-height: 1.4; }
 .tile-swatch-row { display: flex; align-items: center; gap: 9px; margin-top: 15px; color: var(--muted); font-size: 10px; }
 .tile-swatch { width: 28px; max-height: 22px; border: 1px solid #c99a70; background: repeating-linear-gradient(45deg, #574638 0 2px, #2b2925 2px 5px); }
 .tile-unit-note { margin-left: auto; color: var(--quiet); font-family: var(--mono); font-size: 9px; }
@@ -117,6 +121,7 @@
 .switch span { display: block; width: 13px; height: 13px; border-radius: 50%; background: #8a8b80; transition: transform 150ms ease, background 150ms ease; }
 .switch.is-on { background: #786044; border-color: #a88865; }
 .switch.is-on span { transform: translateX(14px); background: #f1d2b4; }
+.switch:disabled { cursor: not-allowed; opacity: 0.4; }
 .section-description { margin: -6px 0 0 31px; color: var(--quiet); font-size: 11px; }
 .waste-input { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 15px 0 0 31px; color: var(--muted); font-size: 11px; }
 .waste-input > span:first-child { display: flex; align-items: center; gap: 7px; }
@@ -126,7 +131,7 @@
 .preview-heading { justify-content: space-between; margin: 0 0 16px; }
 .preview-heading .eyebrow, .estimate-header .eyebrow { margin-bottom: 6px; }
 .preview-heading h2, .estimate-header h2 { font-size: 20px; }
-.preview-set-name { display: flex; align-items: center; gap: 8px; color: var(--quiet); }
+.preview-set-name { display: flex; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: 4px; color: var(--quiet); text-align: right; }
 .canvas-frame { border: 1px solid #41423b; background: #1e1f1c; }
 .canvas-toolbar { display: flex; height: 34px; align-items: center; justify-content: space-between; padding: 0 13px; border-bottom: 1px solid #393a34; color: var(--quiet); font-size: 9px; }
 .canvas-toolbar > span:first-child { display: flex; align-items: center; gap: 8px; }
@@ -171,6 +176,9 @@
 .segmented-control button { min-height: 27px; padding: 0 10px; border: 0; background: transparent; color: var(--quiet); font-size: 10px; cursor: pointer; }
 .segmented-control button.active { color: var(--ink); background: var(--tan); }
 .price-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.box-content-mode { width: fit-content; margin-top: 14px; }
+.coverage-input { margin-top: 0; }
+.coverage-input select { width: 75px; }
 .price-fields label > span:first-child { font-size: 10px; }
 .currency-input > span { padding-left: 9px; color: var(--tan); font-family: var(--mono); font-size: 11px; }
 .price-result { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid #383932; color: var(--quiet); font-size: 10px; }
@@ -189,6 +197,8 @@
 .computation-rows { display: grid; gap: 5px; max-height: 190px; overflow: auto; padding: 9px; border: 1px solid #383932; background: #1c1d1a; }
 .computation-rows > span { color: var(--quiet); font-size: 9px; text-transform: uppercase; }
 .computation-rows > div { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 9px; }
+.computation-rows > div > span { display: grid; gap: 4px; }
+.computation-rows > div > span small { color: var(--quiet); font-size: 9px; line-height: 1.45; }
 .computation-rows strong { font-size: 9px; }
 .paint-computation { margin-top: 18px; }
 .receipt-print { display: none; }
@@ -244,9 +254,10 @@
 @media (max-width: 900px) { .app-shell { padding: 0 28px; } .workspace { grid-template-columns: minmax(270px, 0.8fr) minmax(0, 1.2fr); gap: 30px; } .paint-workspace { grid-template-columns: minmax(0, 1fr) minmax(240px, 0.75fr); gap: 28px; } .canvas-caption { gap: 9px; } .canvas-caption .canvas-hint { display: none; } }
 @media (max-width: 680px) { .app-shell { padding: 0 18px; } .topbar { height: 62px; } .topbar-meta { font-size: 8px; gap: 6px; } .intro { padding: 35px 0 28px; } .intro h1 { font-size: 40px; } .intro-copy { max-width: 250px; line-height: 1.5; } .project-stamp { min-width: 112px; padding-left: 12px; } .project-stamp strong { font-size: 11px; } .view-tabs button { min-width: 0; flex: 1; padding: 0 8px; } .workspace { grid-template-columns: 1fr; gap: 26px; padding-top: 22px; } .paint-workspace { grid-template-columns: 1fr; gap: 25px; padding-top: 22px; } .paint-summary { grid-row: 1; } .paint-controls { grid-row: 2; } .preview-column { grid-row: 1; } .controls-column { grid-row: 2; } .room-canvas { height: 300px; } .canvas-caption { min-height: 38px; } .estimate-header { margin-top: 23px; } .app-footer { gap: 10px; font-size: 8px; } }
 @media (max-width: 390px) { .app-shell { padding: 0 13px; } .brand { font-size: 16px; } .topbar-meta { font-size: 7px; } .intro h1 { font-size: 36px; } .project-stamp { min-width: 98px; } .canvas-caption { font-size: 8px; gap: 7px; } .price-panel-heading { align-items: flex-start; flex-direction: column; } }
-@media (max-width: 760px) { .topbar { height: auto; min-height: 62px; flex-wrap: wrap; gap: 8px; padding: 10px 0; } .topbar-meta { display: none; } .topbar-actions { gap: 6px; } .project-picker { display: none; } .new-project-button { min-height: 32px; } .intro { align-items: flex-start; gap: 14px; } .project-name-input { font-size: 32px; } .receipt-button { flex: 0 0 auto; } }
+@media (max-width: 760px) { .topbar { height: auto; min-height: 62px; flex-wrap: wrap; gap: 8px; padding: 10px 0; } .topbar-meta { display: none; } .topbar-actions { gap: 6px; } .project-picker { display: none; } .new-project-button { min-height: 32px; } .intro { align-items: flex-start; gap: 14px; } .project-name-input { font-size: 32px; } .receipt-actions { align-items: flex-end; flex-direction: column; gap: 9px; } .receipt-button { flex: 0 0 auto; } }
 @media (max-width: 760px) { .project-data-button { width: 34px; padding: 0; } .project-data-button span { display: none; } }
 @media print { @page { margin: 16mm; } body { min-width: 0; background: #fff; color: #171717; } .app-shell > :not(.receipt-print) { display: none !important; } .receipt-print { display: block !important; color: #171717; font: 12px/1.45 Arial, sans-serif; } .receipt-print h1 { margin: 0 0 5mm; font-size: 22px; font-weight: 600; } .receipt-print p { margin: 0 0 8mm; } .receipt-kicker { color: #795b41; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; } .receipt-print h2 { margin: 10mm 0 3mm; color: #171717; font-size: 14px; } .receipt-print table { width: 100%; border-collapse: collapse; margin-bottom: 6mm; } .receipt-print th, .receipt-print td { padding: 8px 5px; border-bottom: 1px solid #ccc; text-align: left; } .receipt-print th { background: #f1eee9; } .receipt-total { display: flex; justify-content: space-between; padding-top: 4mm; border-top: 1px solid #777; font-size: 16px; } }
+@media print { .receipt-print h2 { break-after: avoid; } .receipt-print tr { break-inside: avoid; } .receipt-print th { background: #eee !important; } .receipt-plan { margin: 0 0 9mm; break-inside: avoid; page-break-inside: avoid; } .receipt-plan figcaption { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2mm; } .receipt-plan figcaption strong { font-size: 12px; } .receipt-plan figcaption span { text-align: right; font-size: 9px; } .receipt-plan svg { display: block; width: 100%; max-height: 150mm; background: #fff; } .receipt-plan p { margin: 2mm 0 0; font-size: 9px; } .receipt-cut-table { table-layout: fixed; font-size: 8px; } .receipt-cut-table th, .receipt-cut-table td { overflow-wrap: anywhere; vertical-align: top; } }
 @media (max-width: 1100px) { .app-shell.has-calculator { width: auto; margin: 0 auto; } .calculator-panel { top: 12px; right: 12px; bottom: 12px; width: min(292px, calc(100vw - 24px)); } .calculator-reopen { right: 0; } .topbar-meta { display: none; } }
 .calculator-panel { position: fixed; z-index: 30; top: 18px; right: 16px; bottom: 18px; display: flex; width: 286px; flex-direction: column; padding: 16px; border: 1px solid #494a42; background: #20211e; box-shadow: 0 18px 48px #0007; }
 .calculator-heading { display: flex; align-items: center; justify-content: space-between; padding-bottom: 15px; border-bottom: 1px solid var(--line); }

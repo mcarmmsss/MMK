@@ -25,11 +25,13 @@ type Alignment = 'start' | 'center' | 'end'
 type Rect = { id: number; x: number; y: number; width: number; height: number }
 type DragState = { id: number; origin: Rect; pointer: { x: number; y: number }; draft: Rect }
 type TileRowCount = { row: number; full: number; cut: number }
-type TilePieceCount = { total: number; full: number; cut: number; rows: TileRowCount[]; approximate: boolean }
+type TileCut = { row: number; column: number; tileX: number; tileY: number; tileWidth: number; tileHeight: number; x: number; y: number; width: number; height: number; profile?: Point[] }
+type TileCutPlan = { row: number; column: number; stockTile: number; sourceWidth: number; sourceHeight: number; sourceIsFull: boolean; remainders: Array<{ width: number; height: number }> }
+type TilePieceCount = { total: number; full: number; cut: number; cutArea: number; cuts: TileCut[]; rows: TileRowCount[]; approximate: boolean }
 type Opening = { id: number; count: number; width: number; height: number }
 type PaintSettings = { source: PaintSource; manualArea: number; manualUnit: AreaUnit; wallHeight: number; openings: Opening[]; openingArea: number; openingAreaUnit: AreaUnit; coats: number; volume: PaintVolume; unitPrice: number }
-type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; customBondOffset: number }
-type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number }
+type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; customBondOffset: number; reuseCutTiles: boolean }
+type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number; boxContentMode: 'tiles' | 'area'; coveragePerBox: number; coverageUnit: AreaUnit }
 type Area = { id: number; name: string; tileSetId: string; sections: Rect[]; paint: PaintSettings; tileCalculation: TileCalculation }
 type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[] }
 type ProjectBackup = { format: 'mmk-project-backup'; version: 1; projects: Project[] }
@@ -39,13 +41,14 @@ const unitNames: Record<Unit, string> = { ft: 'ft', in: 'in', cm: 'cm', mm: 'mm'
 const defaultUnit: Unit = 'cm'
 const storageKey = 'area-planner-projects-v1'
 const squareFeetInSquareMetre = 10.7639104167
+const areaUnitLabels: Record<AreaUnit, string> = { m2: 'm²', ft2: 'ft²' }
 
 function createId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 function createTileSet(name = 'Tile set 1'): TileSet {
-  return { id: createId(), name, width: 30 / 2.54, height: 30 / 2.54, rotated: false, wasteOn: false, wastePercent: 10, priceOpen: false, priceMode: 'tile', unitPrice: 0, tilesPerBox: 8 }
+  return { id: createId(), name, width: 30 / 2.54, height: 30 / 2.54, rotated: false, wasteOn: false, wastePercent: 10, priceOpen: false, priceMode: 'tile', unitPrice: 0, tilesPerBox: 8, boxContentMode: 'tiles', coveragePerBox: 0.72, coverageUnit: 'm2' }
 }
 
 function createPaintSettings(): PaintSettings {
@@ -53,7 +56,7 @@ function createPaintSettings(): PaintSettings {
 }
 
 function createTileCalculation(): TileCalculation {
-  return { mode: 'layout', layout: 'straight', bondOffsetMode: 'half', customBondOffset: 0.5 }
+  return { mode: 'layout', layout: 'straight', bondOffsetMode: 'half', customBondOffset: 0.5, reuseCutTiles: false }
 }
 
 function createProject(name = 'Untitled project'): Project {
@@ -79,7 +82,10 @@ function isProjectBackup(value: unknown): value is ProjectBackup {
       typeof tileSet.name === 'string' && isFiniteNumber(tileSet.width) && tileSet.width > 0 && isFiniteNumber(tileSet.height) && tileSet.height > 0 &&
       typeof tileSet.rotated === 'boolean' && typeof tileSet.wasteOn === 'boolean' && isFiniteNumber(tileSet.wastePercent) &&
       typeof tileSet.priceOpen === 'boolean' && (tileSet.priceMode === 'tile' || tileSet.priceMode === 'box') &&
-      isFiniteNumber(tileSet.unitPrice) && isFiniteNumber(tileSet.tilesPerBox) && tileSet.tilesPerBox > 0)
+      isFiniteNumber(tileSet.unitPrice) && isFiniteNumber(tileSet.tilesPerBox) && tileSet.tilesPerBox > 0 &&
+      (tileSet.boxContentMode === undefined || tileSet.boxContentMode === 'tiles' || tileSet.boxContentMode === 'area') &&
+      (tileSet.coveragePerBox === undefined || (isFiniteNumber(tileSet.coveragePerBox) && tileSet.coveragePerBox > 0)) &&
+      (tileSet.coverageUnit === undefined || tileSet.coverageUnit === 'm2' || tileSet.coverageUnit === 'ft2'))
     if (!validTileSets) return false
     return project.areas.every((area) => {
       if (!isRecord(area) || !isFiniteNumber(area.id) || typeof area.name !== 'string' || typeof area.tileSetId !== 'string' || !tileSetIds.includes(area.tileSetId) || !Array.isArray(area.sections) || !area.sections.length) return false
@@ -94,7 +100,8 @@ function isProjectBackup(value: unknown): value is ProjectBackup {
       const calculation = area.tileCalculation
       const validCalculation = (calculation.mode === 'layout' || calculation.mode === 'simple') &&
         (calculation.layout === 'straight' || calculation.layout === 'running-bond' || calculation.layout === 'diagonal' || calculation.layout === 'herringbone') &&
-        (calculation.bondOffsetMode === 'half' || calculation.bondOffsetMode === 'third' || calculation.bondOffsetMode === 'custom') && isFiniteNumber(calculation.customBondOffset)
+        (calculation.bondOffsetMode === 'half' || calculation.bondOffsetMode === 'third' || calculation.bondOffsetMode === 'custom') && isFiniteNumber(calculation.customBondOffset) &&
+        (calculation.reuseCutTiles === undefined || typeof calculation.reuseCutTiles === 'boolean')
       return validPaint && validCalculation
     })
   })
@@ -105,7 +112,7 @@ function prepareImportedProject(project: Project): Project {
   return {
     ...project,
     id: createId(),
-    tileSets: project.tileSets.map((tileSet) => ({ ...tileSet, id: tileSetIds.get(tileSet.id)! })),
+    tileSets: project.tileSets.map((tileSet) => ({ ...createTileSet(tileSet.name), ...tileSet, id: tileSetIds.get(tileSet.id)! })),
     areas: project.areas.map((area, areaIndex) => ({
       ...area,
       id: areaIndex + 1,
@@ -160,6 +167,7 @@ function loadProjects(): Project[] {
     const parsed = stored ? JSON.parse(stored) as Project[] : []
     return parsed.length ? parsed.map((project) => ({
       ...project,
+      tileSets: project.tileSets.map((tileSet) => ({ ...createTileSet(tileSet.name), ...tileSet })),
       areas: project.areas.map((area) => ({
         ...area,
         paint: { ...createPaintSettings(), ...area.paint },
@@ -254,6 +262,14 @@ function areaInSquareInches(rects: Rect[]) {
   return rects.reduce((total, rect) => total + rect.width * rect.height, 0)
 }
 
+function getRectBounds(rects: Rect[]) {
+  const minX = Math.min(...rects.map((rect) => rect.x))
+  const minY = Math.min(...rects.map((rect) => rect.y))
+  const maxX = Math.max(...rects.map((rect) => rect.x + rect.width))
+  const maxY = Math.max(...rects.map((rect) => rect.y + rect.height))
+  return { minX, minY, width: maxX - minX, height: maxY - minY }
+}
+
 type Point = { x: number; y: number }
 
 function countAxisAlignedTiles(rects: Rect[], tileWidth: number, tileHeight: number, offset: number): TilePieceCount {
@@ -265,6 +281,8 @@ function countAxisAlignedTiles(rects: Rect[], tileWidth: number, tileHeight: num
   const lastRow = Math.ceil(maxY / tileHeight) + 1
   const pieces = new Map<string, boolean>()
   const rowCounts = new Map<number, { full: number; cut: number }>()
+  const cuts: TileCut[] = []
+  let cutArea = 0
 
   for (let row = firstRow; row < lastRow; row += 1) {
     const shift = row % 2 === 0 ? 0 : offset * tileWidth
@@ -273,14 +291,19 @@ function countAxisAlignedTiles(rects: Rect[], tileWidth: number, tileHeight: num
     for (let column = firstColumn; column < lastColumn; column += 1) {
       const x = column * tileWidth + shift
       const y = row * tileHeight
-      const covered = rects.reduce((total, rect) => {
+      const fragments = rects.map((rect) => {
         const width = Math.max(0, Math.min(x + tileWidth, rect.x + rect.width) - Math.max(x, rect.x))
         const height = Math.max(0, Math.min(y + tileHeight, rect.y + rect.height) - Math.max(y, rect.y))
-        return total + width * height
-      }, 0)
+        return { x: Math.max(x, rect.x), y: Math.max(y, rect.y), width, height }
+      }).filter((fragment) => fragment.width > 0.001 && fragment.height > 0.001)
+      const covered = fragments.reduce((total, fragment) => total + fragment.width * fragment.height, 0)
       if (covered > 0.001) {
         const full = covered >= tileWidth * tileHeight - 0.001
         pieces.set(`${row}:${column}`, full)
+        if (!full) {
+          cutArea += covered
+          fragments.forEach((fragment) => cuts.push({ row, column, tileX: x, tileY: y, tileWidth, tileHeight, ...fragment }))
+        }
         const counts = rowCounts.get(row) ?? { full: 0, cut: 0 }
         counts[full ? 'full' : 'cut'] += 1
         rowCounts.set(row, counts)
@@ -291,7 +314,7 @@ function countAxisAlignedTiles(rects: Rect[], tileWidth: number, tileHeight: num
   const full = [...pieces.values()].filter(Boolean).length
   const total = pieces.size
   const rows = [...rowCounts].map(([row, counts]) => ({ row, ...counts })).sort((first, second) => first.row - second.row)
-  return { total, full, cut: total - full, rows, approximate: false }
+  return { total, full, cut: total - full, cutArea, cuts, rows, approximate: false }
 }
 
 function clipPolygon(polygon: Point[], edge: 'left' | 'right' | 'top' | 'bottom', bound: number) {
@@ -316,18 +339,45 @@ function clipPolygon(polygon: Point[], edge: 'left' | 'right' | 'top' | 'bottom'
   return output
 }
 
-function polygonOverlapArea(polygon: Point[], rect: Rect) {
-  const clipped = [
+function clipPolygonToRect(polygon: Point[], rect: Rect) {
+  return [
     ['left', rect.x],
     ['right', rect.x + rect.width],
     ['top', rect.y],
     ['bottom', rect.y + rect.height],
   ].reduce((result, [edge, bound]) => clipPolygon(result, edge as 'left' | 'right' | 'top' | 'bottom', bound as number), polygon)
-  if (clipped.length < 3) return 0
-  return Math.abs(clipped.reduce((sum, point, index) => {
-    const next = clipped[(index + 1) % clipped.length]
+}
+
+function polygonArea(polygon: Point[]) {
+  if (polygon.length < 3) return 0
+  return Math.abs(polygon.reduce((sum, point, index) => {
+    const next = polygon[(index + 1) % polygon.length]
     return sum + point.x * next.y - next.x * point.y
   }, 0)) / 2
+}
+
+function simplifyPolygon(polygon: Point[]) {
+  const points = polygon.filter((point, index) => {
+    const previous = polygon[(index + polygon.length - 1) % polygon.length]
+    return Math.hypot(point.x - previous.x, point.y - previous.y) > 0.001
+  })
+  if (points.length > 1 && Math.hypot(points[0].x - points[points.length - 1].x, points[0].y - points[points.length - 1].y) < 0.001) points.pop()
+  let changed = true
+  while (changed && points.length > 3) {
+    changed = false
+    for (let index = 0; index < points.length; index += 1) {
+      const previous = points[(index + points.length - 1) % points.length]
+      const current = points[index]
+      const next = points[(index + 1) % points.length]
+      const cross = (current.x - previous.x) * (next.y - current.y) - (current.y - previous.y) * (next.x - current.x)
+      if (Math.abs(cross) < 0.001) {
+        points.splice(index, 1)
+        changed = true
+        break
+      }
+    }
+  }
+  return points
 }
 
 function countDiagonalTiles(rects: Rect[], tileWidth: number, tileHeight: number): TilePieceCount {
@@ -348,6 +398,8 @@ function countDiagonalTiles(rects: Rect[], tileWidth: number, tileHeight: number
   const maxY = Math.max(...corners.map((point) => point.y))
   const pieces: boolean[] = []
   const rowCounts = new Map<number, { full: number; cut: number }>()
+  const cuts: TileCut[] = []
+  let cutArea = 0
   for (let row = Math.floor(minY / tileHeight) - 1; row < Math.ceil(maxY / tileHeight) + 1; row += 1) {
     for (let column = Math.floor(minX / tileWidth) - 1; column < Math.ceil(maxX / tileWidth) + 1; column += 1) {
       const polygon = [
@@ -356,10 +408,21 @@ function countDiagonalTiles(rects: Rect[], tileWidth: number, tileHeight: number
         { x: (column + 1) * tileWidth, y: (row + 1) * tileHeight },
         { x: column * tileWidth, y: (row + 1) * tileHeight },
       ].map((point) => rotate(point, angle))
-      const covered = rects.reduce((total, rect) => total + polygonOverlapArea(polygon, rect), 0)
+      const fragments = rects.map((rect) => clipPolygonToRect(polygon, rect)).filter((fragment) => polygonArea(fragment) > 0.001)
+      const covered = fragments.reduce((total, fragment) => total + polygonArea(fragment), 0)
       if (covered > 0.001) {
         const full = covered >= tileWidth * tileHeight - 0.001
         pieces.push(full)
+        if (!full) {
+          cutArea += covered
+          fragments.forEach((fragment) => {
+            const profile = simplifyPolygon(fragment.map((point) => {
+              const local = rotate(point, -angle)
+              return { x: local.x - column * tileWidth, y: local.y - row * tileHeight }
+            }))
+            cuts.push({ row, column, tileX: column * tileWidth, tileY: row * tileHeight, tileWidth, tileHeight, x: 0, y: 0, width: tileWidth, height: tileHeight, profile })
+          })
+        }
         const counts = rowCounts.get(row) ?? { full: 0, cut: 0 }
         counts[full ? 'full' : 'cut'] += 1
         rowCounts.set(row, counts)
@@ -368,7 +431,7 @@ function countDiagonalTiles(rects: Rect[], tileWidth: number, tileHeight: number
   }
   const full = pieces.filter(Boolean).length
   const rows = [...rowCounts].map(([row, counts]) => ({ row, ...counts })).sort((first, second) => first.row - second.row)
-  return { total: pieces.length, full, cut: pieces.length - full, rows, approximate: false }
+  return { total: pieces.length, full, cut: pieces.length - full, cutArea, cuts, rows, approximate: false }
 }
 
 function countHerringboneTiles(rects: Rect[], tileWidth: number, tileHeight: number): TilePieceCount {
@@ -396,20 +459,27 @@ function countHerringboneTiles(rects: Rect[], tileWidth: number, tileHeight: num
   const maxY = Math.max(...rects.map((rect) => rect.y + rect.height))
   const pieces: boolean[] = []
   const rowCounts = new Map<number, { full: number; cut: number }>()
+  const cuts: TileCut[] = []
+  let cutArea = 0
 
   for (let blockY = Math.floor(minY / period) - 1; blockY < Math.ceil(maxY / period) + 1; blockY += 1) {
     for (let blockX = Math.floor(minX / period) - 1; blockX < Math.ceil(maxX / period) + 1; blockX += 1) {
       placements.forEach((placement) => {
         const x = blockX * period + placement.x
         const y = blockY * period + placement.y
-        const covered = rects.reduce((total, rect) => {
+        const fragments = rects.map((rect) => {
           const width = Math.max(0, Math.min(x + placement.width, rect.x + rect.width) - Math.max(x, rect.x))
           const height = Math.max(0, Math.min(y + placement.height, rect.y + rect.height) - Math.max(y, rect.y))
-          return total + width * height
-        }, 0)
+          return { x: Math.max(x, rect.x), y: Math.max(y, rect.y), width, height }
+        }).filter((fragment) => fragment.width > 0.001 && fragment.height > 0.001)
+        const covered = fragments.reduce((total, fragment) => total + fragment.width * fragment.height, 0)
         if (covered > 0.001) {
           const full = covered >= placement.width * placement.height - 0.001
           pieces.push(full)
+          if (!full) {
+            cutArea += covered
+            fragments.forEach((fragment) => cuts.push({ row: blockY * 4 + placement.y / unit, column: blockX * 4 + placement.x / unit, tileX: x, tileY: y, tileWidth: placement.width, tileHeight: placement.height, ...fragment }))
+          }
           const row = blockY * 4 + placement.y / unit
           const counts = rowCounts.get(row) ?? { full: 0, cut: 0 }
           counts[full ? 'full' : 'cut'] += 1
@@ -420,7 +490,7 @@ function countHerringboneTiles(rects: Rect[], tileWidth: number, tileHeight: num
   }
   const full = pieces.filter(Boolean).length
   const rows = [...rowCounts].map(([row, counts]) => ({ row, ...counts })).sort((first, second) => first.row - second.row)
-  return { total: pieces.length, full, cut: pieces.length - full, rows, approximate: false }
+  return { total: pieces.length, full, cut: pieces.length - full, cutArea, cuts, rows, approximate: false }
 }
 
 function countPatternTilePieces(rects: Rect[], tileWidth: number, tileHeight: number, layout: TileLayout, offset: number): TilePieceCount {
@@ -436,20 +506,155 @@ function getBondOffset(calculation: TileCalculation) {
   return Math.min(0.95, Math.max(0.05, calculation.customBondOffset))
 }
 
+function getTileLayoutName(calculation: TileCalculation) {
+  return calculation.layout === 'running-bond'
+    ? `Running bond · ${Math.round(getBondOffset(calculation) * 100)}% offset`
+    : calculation.layout.replace('-', ' ')
+}
+
+function getTilePattern(tileWidth: number, tileHeight: number, calculation: TileCalculation) {
+  const bondOffset = getBondOffset(calculation)
+  const bondColumns = calculation.bondOffsetMode === 'half' ? 2 : calculation.bondOffsetMode === 'third' ? 3 : 100
+  if (calculation.layout === 'running-bond') {
+    const width = tileWidth * bondColumns
+    const path = Array.from({ length: 2 }, (_, row) => {
+      const offset = row === 0 ? 0 : bondOffset * tileWidth
+      const verticals = Array.from({ length: bondColumns + 2 }, (_, column) => `M ${column * tileWidth + offset} ${row * tileHeight} V ${(row + 1) * tileHeight}`).join(' ')
+      return `${verticals} M 0 ${(row + 1) * tileHeight} H ${width}`
+    }).join(' ')
+    return { width, height: tileHeight * 2, path, transform: undefined }
+  }
+  if (calculation.layout === 'herringbone') {
+    const unit = Math.min(tileWidth, tileHeight)
+    const placements = [
+      { x: 0, y: 0, width: 2, height: 1 },
+      { x: 2, y: 0, width: 2, height: 1 },
+      { x: 1, y: 1, width: 2, height: 1 },
+      { x: 1, y: 2, width: 2, height: 1 },
+      { x: 0, y: 3, width: 2, height: 1 },
+      { x: 2, y: 3, width: 2, height: 1 },
+      { x: 0, y: 1, width: 1, height: 2 },
+      { x: 3, y: 1, width: 1, height: 2 },
+    ]
+    const path = placements.map((placement) => `M ${placement.x * unit} ${placement.y * unit} h ${placement.width * unit} v ${placement.height * unit} h ${-placement.width * unit} Z`).join(' ')
+    return { width: unit * 4, height: unit * 4, path, transform: undefined }
+  }
+  return {
+    width: tileWidth,
+    height: tileHeight,
+    path: `M ${tileWidth} 0 L 0 0 0 ${tileHeight}`,
+    transform: calculation.layout === 'diagonal' ? 'rotate(45)' : undefined,
+  }
+}
+
+function summarizeTileCuts(cuts: TileCut[], unit: Unit, cutPlan: TileCutPlan[] = []) {
+  const groups = new Map<string, { quantity: number; piece: string; instruction: string; positions: string[] }>()
+  const format = (value: number) => displayLength(value, unit)
+  cuts.forEach((cut) => {
+    const plan = cutPlan.find((entry) => entry.row === cut.row && entry.column === cut.column)
+    const profile = cut.profile?.map((point) => `${format(point.x)}, ${format(point.y)}`)
+    const trims = [
+      ['left', cut.x - cut.tileX],
+      ['right', cut.tileX + cut.tileWidth - cut.x - cut.width],
+      ['top', cut.y - cut.tileY],
+      ['bottom', cut.tileY + cut.tileHeight - cut.y - cut.height],
+    ].filter(([, amount]) => (amount as number) > 0.001).map(([side, amount]) => `${side} ${format(amount as number)} ${unit}`)
+    const piece = profile
+      ? `Diagonal profile: ${profile.map((point, index) => `P${index + 1} (${point})`).join(' · ')} ${unit}`
+      : `${format(cut.width)} × ${format(cut.height)} ${unit}`
+    const offcuts = profile ? [] : [
+      { width: cut.x - cut.tileX, height: cut.tileHeight },
+      { width: cut.tileX + cut.tileWidth - cut.x - cut.width, height: cut.tileHeight },
+      { width: cut.width, height: cut.y - cut.tileY },
+      { width: cut.width, height: cut.tileY + cut.tileHeight - cut.y - cut.height },
+    ].filter((remainder) => remainder.width > 0.001 && remainder.height > 0.001)
+    const instruction = plan
+      ? `Place at the top-left of ${plan.sourceIsFull ? `full cut-stock tile ${plan.stockTile}` : `tile ${plan.stockTile}'s ${format(plan.sourceWidth)} × ${format(plan.sourceHeight)} offcut`}, then cut ${format(cut.width)} × ${format(cut.height)} ${unit}.${plan.remainders.length ? ` New remainders: ${plan.remainders.map((remainder) => `${format(remainder.width)} × ${format(remainder.height)} ${unit}`).join(' + ')}.` : ' No reusable remainder.'}`
+      : profile
+      ? 'Mark the profile points from the tile origin and cut between them; remaining profile is irregular.'
+      : `${trims.length ? `Trim ${trims.join('; ')} from the tile.` : 'Cut to the listed size.'}${offcuts.length ? ` Remainders: ${offcuts.map((remainder) => `${format(remainder.width)} × ${format(remainder.height)} ${unit}`).join(' + ')}.` : ''}`
+    const key = profile
+      ? `profile:${profile.join('|')}`
+      : `rect:${[cut.width, cut.height, ...trims, plan?.stockTile ?? 0, plan?.sourceWidth ?? 0, plan?.sourceHeight ?? 0, ...(plan?.remainders.flatMap((remainder) => [remainder.width, remainder.height]) ?? [])].map((value) => typeof value === 'number' ? format(value) : value).join('|')}`
+    const group = groups.get(key) ?? { quantity: 0, piece, instruction, positions: [] }
+    group.quantity += 1
+    group.positions.push(`R${cut.row + 1}/C${cut.column + 1}`)
+    groups.set(key, group)
+  })
+  return [...groups.values()]
+}
+
+function calculateRectangularCutReuse(layoutPieces: TilePieceCount, tileWidth: number, tileHeight: number) {
+  const positionCounts = new Map<string, number>()
+  layoutPieces.cuts.forEach((cut) => {
+    const key = `${cut.row}:${cut.column}`
+    positionCounts.set(key, (positionCounts.get(key) ?? 0) + 1)
+  })
+  if (layoutPieces.cuts.some((cut) => cut.profile) || layoutPieces.cuts.length !== layoutPieces.cut || [...positionCounts.values()].some((count) => count !== 1)) return null
+
+  const remainders: Array<{ width: number; height: number; stockTile: number; isFullTile: boolean }> = []
+  const plan: TileCutPlan[] = []
+  let cutTiles = 0
+  const cuts = [...layoutPieces.cuts].sort((first, second) => second.width * second.height - first.width * first.height)
+  cuts.forEach((cut) => {
+    if (cut.width > tileWidth + 0.001 || cut.height > tileHeight + 0.001) return
+    let bestIndex = -1
+    let bestWaste = Number.POSITIVE_INFINITY
+    remainders.forEach((remainder, index) => {
+      if (remainder.width + 0.001 < cut.width || remainder.height + 0.001 < cut.height) return
+      const waste = remainder.width * remainder.height - cut.width * cut.height
+      if (waste < bestWaste) {
+        bestIndex = index
+        bestWaste = waste
+      }
+    })
+    if (bestIndex < 0) {
+      cutTiles += 1
+      remainders.push({ width: tileWidth, height: tileHeight, stockTile: cutTiles, isFullTile: true })
+      bestIndex = remainders.length - 1
+    }
+    const remainder = remainders.splice(bestIndex, 1)[0]
+    const rightWidth = remainder.width - cut.width
+    const bottomHeight = remainder.height - cut.height
+    const newRemainders = [
+      { width: rightWidth, height: remainder.height },
+      { width: cut.width, height: bottomHeight },
+    ].filter((offcut) => offcut.width > 0.001 && offcut.height > 0.001)
+    plan.push({ row: cut.row, column: cut.column, stockTile: remainder.stockTile, sourceWidth: remainder.width, sourceHeight: remainder.height, sourceIsFull: remainder.isFullTile, remainders: newRemainders })
+    newRemainders.forEach((offcut) => remainders.push({ ...offcut, stockTile: remainder.stockTile, isFullTile: false }))
+  })
+  if (plan.length !== cuts.length) return null
+  return { baseTiles: layoutPieces.full + cutTiles, savings: Math.max(0, layoutPieces.cut - cutTiles), plan }
+}
+
 function calculateTileEstimate(area: Area, tileSet: TileSet) {
   const tileWidth = tileSet.rotated ? tileSet.height : tileSet.width
   const tileHeight = tileSet.rotated ? tileSet.width : tileSet.height
   const areaRatio = areaInSquareInches(area.sections) / (tileWidth * tileHeight)
   const layoutPieces = countPatternTilePieces(area.sections, tileWidth, tileHeight, area.tileCalculation.layout, getBondOffset(area.tileCalculation))
-  const baseTiles = area.tileCalculation.mode === 'simple' ? areaRatio : layoutPieces.total
+  const cutReuse = calculateRectangularCutReuse(layoutPieces, tileWidth, tileHeight)
+  const reuseSupported = cutReuse !== null
+  const reusedBaseTiles = cutReuse?.baseTiles ?? layoutPieces.total
+  const reuseSavings = cutReuse?.savings ?? 0
+  const cutPlan = cutReuse?.plan ?? []
+  const baseTiles = area.tileCalculation.mode === 'simple' ? areaRatio : area.tileCalculation.reuseCutTiles && reuseSupported ? reusedBaseTiles : layoutPieces.total
   const wastePercent = tileSet.wasteOn ? tileSet.wastePercent : 0
   const materialTiles = area.tileCalculation.mode === 'simple'
     ? Math.ceil(areaRatio * (1 + wastePercent / 100))
-    : layoutPieces.total + Math.ceil(layoutPieces.total * wastePercent / 100)
+    : baseTiles + Math.ceil(baseTiles * wastePercent / 100)
   const wasteTiles = area.tileCalculation.mode === 'simple'
     ? areaRatio * wastePercent / 100
-    : materialTiles - layoutPieces.total
-  return { originalTileWidth: tileSet.width, originalTileHeight: tileSet.height, rotated: tileSet.rotated, tileWidth, tileHeight, areaRatio, layoutPieces, baseTiles, wastePercent, wasteTiles, materialTiles }
+    : materialTiles - baseTiles
+  return { originalTileWidth: tileSet.width, originalTileHeight: tileSet.height, rotated: tileSet.rotated, tileWidth, tileHeight, areaRatio, layoutPieces, reusedBaseTiles, reuseSavings, reuseSupported, cutPlan, baseTiles, wastePercent, wasteTiles, materialTiles }
+}
+
+function calculateBoxCount(tileCount: number, tileSet: TileSet) {
+  if (tileSet.boxContentMode === 'area') {
+    const requiredArea = tileCount * tileSet.width * tileSet.height * 0.00064516
+    const coveragePerBox = areaToSquareMetres(tileSet.coveragePerBox, tileSet.coverageUnit)
+    return Math.ceil(requiredArea / Math.max(0.000001, coveragePerBox))
+  }
+  return Math.ceil(tileCount / Math.max(1, tileSet.tilesPerBox))
 }
 
 function App() {
@@ -475,6 +680,7 @@ function App() {
   const [drag, setDrag] = useState<DragState | null>(null)
   const importFileRef = useRef<HTMLInputElement>(null)
   const [calculatorOpen, setCalculatorOpen] = useState(true)
+  const [showPlanInReceipt, setShowPlanInReceipt] = useState(false)
 
   useEffect(() => {
     localStorage.setItem(storageKey, JSON.stringify(projects))
@@ -484,29 +690,51 @@ function App() {
   const selected = sections.find((section) => section.id === selectedId) ?? sections[0]
   const tileW = assignedTileSet.rotated ? assignedTileSet.height : assignedTileSet.width
   const tileH = assignedTileSet.rotated ? assignedTileSet.width : assignedTileSet.height
+  const squareUnitScale = unitScale[unit] ** 2
   const editingWidth = editingTileSet.rotated ? editingTileSet.height : editingTileSet.width
   const editingHeight = editingTileSet.rotated ? editingTileSet.width : editingTileSet.height
   const visualSections = drag ? sections.map((section) => section.id === drag.id ? drag.draft : section) : sections
   const tileEstimate = calculateTileEstimate(selectedArea, assignedTileSet)
+  const selectedCutSummaries = summarizeTileCuts(tileEstimate.layoutPieces.cuts, unit, selectedArea.tileCalculation.reuseCutTiles ? tileEstimate.cutPlan : [])
   const baseTiles = tileEstimate.baseTiles
   const wasteTiles = tileEstimate.wasteTiles
   const materialTiles = tileEstimate.materialTiles
-  const boxCount = Math.ceil(materialTiles / Math.max(1, assignedTileSet.tilesPerBox))
+  const boxCount = calculateBoxCount(materialTiles, assignedTileSet)
   const priceTotal = assignedTileSet.priceMode === 'tile' ? materialTiles * assignedTileSet.unitPrice : boxCount * assignedTileSet.unitPrice
   const paintEstimate = calculatePaint(sections, selectedArea.paint)
   const receiptItems = activeProject.areas.map((area) => {
     const tileSet = activeProject.tileSets.find((entry) => entry.id === area.tileSetId) ?? assignedTileSet
     const estimate = calculateTileEstimate(area, tileSet)
-    return { area, tileSet, tiles: estimate.baseTiles, waste: estimate.wasteTiles, total: estimate.materialTiles, layoutPieces: estimate.layoutPieces, areaRatio: estimate.areaRatio }
+    const tileWidth = tileSet.rotated ? tileSet.height : tileSet.width
+    const tileHeight = tileSet.rotated ? tileSet.width : tileSet.height
+    return {
+      area,
+      tileSet,
+      tiles: estimate.baseTiles,
+      base: estimate.baseTiles,
+      waste: estimate.wasteTiles,
+      wastePercent: tileSet.wasteOn ? tileSet.wastePercent : 0,
+      total: estimate.materialTiles,
+      layoutPieces: estimate.layoutPieces,
+      areaRatio: estimate.areaRatio,
+      tileWidth,
+      tileHeight,
+      bounds: getRectBounds(area.sections),
+      pattern: getTilePattern(tileWidth, tileHeight, area.tileCalculation),
+      cutSummaries: summarizeTileCuts(estimate.layoutPieces.cuts, unit, area.tileCalculation.reuseCutTiles ? estimate.cutPlan : []),
+    }
   })
   const receiptPaintItems = activeProject.areas.map((area) => ({ area, ...calculatePaint(area.sections, area.paint) }))
   const receiptTileSets = activeProject.tileSets.map((tileSet) => {
     const items = receiptItems.filter((item) => item.tileSet.id === tileSet.id)
     const total = items.reduce((sum, item) => sum + item.total, 0)
-    const boxes = Math.ceil(total / Math.max(1, tileSet.tilesPerBox))
+    const base = items.reduce((sum, item) => sum + item.base, 0)
+    const waste = items.reduce((sum, item) => sum + item.waste, 0)
+    const boxes = calculateBoxCount(total, tileSet)
     const amount = tileSet.priceMode === 'tile' ? total * tileSet.unitPrice : boxes * tileSet.unitPrice
-    return { tileSet, total, boxes, amount }
+    return { tileSet, base, waste, wastePercent: tileSet.wasteOn ? tileSet.wastePercent : 0, total, boxes, amount }
   }).filter((item) => item.total > 0)
+  const receiptCutItems = receiptItems.flatMap((item) => item.cutSummaries.map((cut, index) => ({ ...cut, area: item.area, tileSet: item.tileSet, index })))
   const receiptTileTotal = receiptTileSets.reduce((sum, item) => sum + item.amount, 0)
   const receiptPaintTotal = receiptPaintItems.reduce((sum, item) => sum + item.cost, 0)
   const receiptTotal = receiptTileTotal + receiptPaintTotal
@@ -834,7 +1062,7 @@ function App() {
           <h1 className="project-heading"><input className="project-name-input" aria-label="Project name" value={activeProject.name} onChange={(event) => updateProject((project) => ({ ...project, name: event.target.value }))} /></h1>
           <p className="intro-copy">Measure areas and plan materials.</p>
         </div>
-        <button className="receipt-button" type="button" onClick={() => window.print()}><img src={downloadIcon} alt="" /> Print receipt</button>
+        <div className="receipt-actions"><div className="receipt-plan-toggle"><span>Show plan</span><button className={`switch ${showPlanInReceipt ? 'is-on' : ''}`} type="button" role="switch" aria-checked={showPlanInReceipt} aria-label="Show plan in receipt" onClick={() => setShowPlanInReceipt((visible) => !visible)}><span /></button></div><button className="receipt-button" type="button" onClick={() => window.print()}><img src={downloadIcon} alt="" /> Print receipt</button></div>
       </section>
 
       <nav className="view-tabs" role="tablist" aria-label="Material views">
@@ -888,6 +1116,7 @@ function App() {
               {selectedArea.tileCalculation.layout === 'running-bond' && <div className="bond-offset-fields"><label className="tile-layout-select"><span>Row offset</span><select value={selectedArea.tileCalculation.bondOffsetMode} onChange={(event) => updateTileCalculation((calculation) => ({ ...calculation, bondOffsetMode: event.target.value as BondOffsetMode }))}><option value="half">Half tile</option><option value="third">Third tile</option><option value="custom">Custom fraction</option></select></label>{selectedArea.tileCalculation.bondOffsetMode === 'custom' && <label className="tile-layout-select"><span>Offset of tile width</span><span className="input-wrap"><NumericInput min="5" max="95" step="1" value={Math.round(selectedArea.tileCalculation.customBondOffset * 100)} onValueChange={(value) => updateTileCalculation((calculation) => ({ ...calculation, customBondOffset: Math.min(0.95, Math.max(0.05, value / 100)) }))} /><small>%</small></span></label>}</div>}
               {selectedArea.tileCalculation.layout === 'herringbone' && <p className="section-description layout-note">A 2:1 tile proportion gives the standard herringbone pattern. Other proportions use an approximate count.</p>}
             </>}
+            {selectedArea.tileCalculation.mode === 'layout' && <div className="reuse-control"><div><span>Reuse cut tiles</span><p>{tileEstimate.reuseSupported ? 'Uses a best-fit schedule for same-orientation rectangular offcuts.' : 'Irregular, split, or rotated cuts are not reused.'}</p></div><button className={`switch ${selectedArea.tileCalculation.reuseCutTiles ? 'is-on' : ''}`} type="button" role="switch" aria-checked={selectedArea.tileCalculation.reuseCutTiles} aria-label="Reuse cut tiles" disabled={!tileEstimate.reuseSupported} onClick={() => updateTileCalculation((calculation) => ({ ...calculation, reuseCutTiles: !calculation.reuseCutTiles }))}><span /></button></div>}
           </section>
 
           <section className="control-section tile-section">
@@ -912,7 +1141,7 @@ function App() {
         </aside>
 
         <section className="preview-column">
-          <div className="preview-heading"><div><p className="eyebrow">AREA PREVIEW</p><h2>{selectedArea.name}</h2></div><span className="preview-set-name">{assignedTileSet.name}</span></div>
+          <div className="preview-heading"><div><p className="eyebrow">AREA PREVIEW</p><h2>{selectedArea.name}</h2></div><span className="preview-set-name">{assignedTileSet.name} · {displayLength(assignedTileSet.width, unit)} × {displayLength(assignedTileSet.height, unit)} {unit}</span></div>
           <div className="canvas-frame">
             <div className="canvas-toolbar"><span><span className="toolbar-dot" /> PLAN VIEW</span><span>{displayLength(bounds.roomWidth, unit)} × {displayLength(bounds.roomHeight, unit)} {unit}</span></div>
             <svg className="room-canvas" viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`} onPointerMove={moveDrag} onPointerUp={finishDrag} onPointerCancel={() => setDrag(null)} role="img" aria-label={`${selectedArea.name} tile plan`}>
@@ -937,7 +1166,8 @@ function App() {
 
           <div className="estimate-header"><div><p className="eyebrow">MATERIAL ESTIMATE</p><h2>{selectedArea.name}</h2></div><span className="estimate-count"><strong>{materialTiles.toLocaleString()}</strong><small>tiles total</small></span></div>
           <div className="estimate-lines">
-            <div className="estimate-line"><span>{selectedArea.tileCalculation.mode === 'simple' ? 'Area ratio' : 'Base tiles'}</span><strong>{selectedArea.tileCalculation.mode === 'simple' ? baseTiles.toFixed(2) : baseTiles.toLocaleString()} <small>{selectedArea.tileCalculation.mode === 'simple' ? 'tiles' : 'tiles'}</small></strong></div>
+            <div className="estimate-line"><span>{selectedArea.tileCalculation.mode === 'simple' ? 'Area ratio' : selectedArea.tileCalculation.reuseCutTiles ? 'Placement count' : 'Base tiles'}</span><strong>{selectedArea.tileCalculation.mode === 'simple' ? baseTiles.toFixed(2) : selectedArea.tileCalculation.reuseCutTiles ? tileEstimate.layoutPieces.total.toLocaleString() : baseTiles.toLocaleString()} <small>tiles</small></strong></div>
+            {selectedArea.tileCalculation.mode === 'layout' && selectedArea.tileCalculation.reuseCutTiles && <div className="estimate-line"><span>Cut-tile reuse</span><strong>−{tileEstimate.reuseSavings} <small>tiles</small></strong></div>}
             {assignedTileSet.wasteOn && <div className="estimate-line waste-line"><span><img src={percentIcon} alt="" /> Wastage <small>{assignedTileSet.wastePercent}%</small></span><strong>+{wasteTiles.toLocaleString(undefined, { minimumFractionDigits: selectedArea.tileCalculation.mode === 'simple' ? 2 : 0, maximumFractionDigits: 2 })} <small>tiles</small></strong></div>}
             <div className="estimate-line total-line"><span>Total tiles</span><strong>{materialTiles.toLocaleString()} <small>tiles</small></strong></div>
           </div>
@@ -957,20 +1187,25 @@ function App() {
               </> : <>
                 <div><span>Placement</span><strong>{selectedArea.tileCalculation.layout.replace('-', ' ')}{selectedArea.tileCalculation.layout === 'running-bond' ? ` · ${Math.round(bondOffset * 100)}% offset` : ''}</strong></div>
                 <p>{tileEstimate.layoutPieces.full} whole + {tileEstimate.layoutPieces.cut} cut = {tileEstimate.layoutPieces.total} base tiles{tileEstimate.layoutPieces.approximate ? ' · approximate for this tile proportion' : ''}</p>
+                <p>Measured partial-tile area: {(tileEstimate.layoutPieces.cutArea / squareUnitScale).toFixed(2)} {unit}² across {tileEstimate.layoutPieces.cut} cut positions</p>
+                <p>{tileEstimate.reuseSupported ? `Best-fit offcut schedule: ${tileEstimate.layoutPieces.full} whole + ${tileEstimate.layoutPieces.cut - tileEstimate.reuseSavings} cut-stock tiles = ${tileEstimate.reusedBaseTiles} base tiles; saves ${tileEstimate.reuseSavings} tiles` : 'Offcut reuse is not counted for split or irregular cut profiles'}{selectedArea.tileCalculation.reuseCutTiles && tileEstimate.reuseSupported ? ' · applied' : ' · not applied'}</p>
                 <div className="computation-rows"><span>Tile positions by row</span>{tileEstimate.layoutPieces.rows.map((row, index) => <div key={row.row}><span>Row {index + 1}</span><strong>{row.full} whole + {row.cut} cut = {row.full + row.cut}</strong></div>)}</div>
-                <p>{tileEstimate.layoutPieces.total} × {tileEstimate.wastePercent}% wastage = {tileEstimate.wasteTiles} extra</p>
-                <p>{tileEstimate.layoutPieces.total} + {tileEstimate.wasteTiles} = {tileEstimate.materialTiles} tiles</p>
+                {selectedCutSummaries.length > 0 && <div className="computation-rows"><span>Exact cuts and remainders</span>{selectedCutSummaries.map((cut, index) => <div key={`${cut.piece}-${index}`}><span>{cut.quantity} × {cut.piece}<small>{cut.instruction}</small></span><strong>{cut.positions.join(', ')}</strong></div>)}</div>}
+                <p>{tileEstimate.baseTiles} × {tileEstimate.wastePercent}% wastage = {tileEstimate.wasteTiles} extra</p>
+                <p>{tileEstimate.baseTiles} + {tileEstimate.wasteTiles} = {tileEstimate.materialTiles} tiles</p>
               </>}
             </div>}
           </div>
           <button className={`price-toggle ${assignedTileSet.priceOpen ? 'is-open' : ''}`} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, priceOpen: !tileSet.priceOpen }))} aria-expanded={assignedTileSet.priceOpen}><span className="price-icon"><img src={moneyIcon} alt="" /></span><span><strong>Price estimate</strong><small>{assignedTileSet.priceOpen ? 'Hide price options' : 'Optional pricing'}</small></span><span className="price-chevron">{assignedTileSet.priceOpen ? '−' : '+'}</span></button>
           {assignedTileSet.priceOpen && <div className="price-panel">
             <div className="price-panel-heading"><div><img src={packageIcon} alt="" /><span>Sold by</span></div><div className="segmented-control"><button className={assignedTileSet.priceMode === 'tile' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, priceMode: 'tile' }))}>Tile</button><button className={assignedTileSet.priceMode === 'box' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, priceMode: 'box' }))}>Box</button></div></div>
+            {assignedTileSet.priceMode === 'box' && <div className="segmented-control box-content-mode"><button className={assignedTileSet.boxContentMode === 'tiles' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, boxContentMode: 'tiles' }))}>Tiles per box</button><button className={assignedTileSet.boxContentMode === 'area' ? 'active' : ''} type="button" onClick={() => updateAssignedTileSet((tileSet) => ({ ...tileSet, boxContentMode: 'area' }))}>Area per box</button></div>}
             <div className="price-fields">
               <label><span>Price per {assignedTileSet.priceMode}</span><span className="currency-input"><span>₱</span><NumericInput min="0" step="0.01" value={assignedTileSet.unitPrice} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, unitPrice: Math.max(0, value) }))} /></span></label>
-              {assignedTileSet.priceMode === 'box' && <label><span>Tiles per box</span><span className="input-wrap"><NumericInput min="1" step="1" value={assignedTileSet.tilesPerBox} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, tilesPerBox: Math.max(1, value) }))} /><small>tiles</small></span></label>}
+              {assignedTileSet.priceMode === 'box' && assignedTileSet.boxContentMode === 'tiles' && <label><span>Tiles per box</span><span className="input-wrap"><NumericInput min="1" step="1" value={assignedTileSet.tilesPerBox} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, tilesPerBox: Math.max(1, value) }))} /><small>tiles</small></span></label>}
+              {assignedTileSet.priceMode === 'box' && assignedTileSet.boxContentMode === 'area' && <label><span>Coverage per box</span><div className="area-input-pair coverage-input"><span className="input-wrap"><NumericInput min="0.01" step="0.01" value={assignedTileSet.coveragePerBox} onValueChange={(value) => updateAssignedTileSet((tileSet) => ({ ...tileSet, coveragePerBox: Math.max(0.01, value) }))} /><small>area</small></span><select aria-label="Coverage unit" value={assignedTileSet.coverageUnit} onChange={(event) => updateAssignedTileSet((tileSet) => ({ ...tileSet, coverageUnit: event.target.value as AreaUnit }))}><option value="m2">m²</option><option value="ft2">ft²</option></select></div></label>}
             </div>
-            <div className="price-result"><span>{assignedTileSet.priceMode === 'box' ? `${boxCount} ${boxCount === 1 ? 'box' : 'boxes'} · ${boxCount * assignedTileSet.tilesPerBox} tiles` : `${materialTiles.toLocaleString()} tiles`}</span><strong>{formatMoney(priceTotal)}</strong></div>
+            <div className="price-result"><span>{assignedTileSet.priceMode === 'box' ? assignedTileSet.boxContentMode === 'tiles' ? `${boxCount} ${boxCount === 1 ? 'box' : 'boxes'} · ${boxCount * assignedTileSet.tilesPerBox} tiles` : `${boxCount} ${boxCount === 1 ? 'box' : 'boxes'} · ${(boxCount * assignedTileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[assignedTileSet.coverageUnit]} coverage` : `${materialTiles.toLocaleString()} tiles`}</span><strong>{formatMoney(priceTotal)}</strong></div>
           </div>}
           <p className="estimate-footnote">Estimate excludes installation and delivery.</p>
         </section>
@@ -1040,10 +1275,11 @@ function App() {
         <div className="calculations-heading"><div><p className="eyebrow">REFERENCE</p><h2>Formulas</h2></div></div>
         <div className="formula-list">
           <article className="formula-item"><span className="formula-index">01</span><div><h3>Simple area tile quantity</h3><p>Use the room area and the area of one tile, then apply the selected tile set's wastage percentage and round up to a whole tile.</p><strong>Raw quantity = room area ÷ tile area</strong><strong>Total tiles = ceil(raw quantity × (1 + wastage% ÷ 100))</strong></div></article>
-          <article className="formula-item"><span className="formula-index">02</span><div><h3>Placement tile quantity</h3><p>Count whole and cut tile positions from the selected placement layout and area outline, then add wastage.</p><strong>Base tiles = whole tiles + cut tiles</strong><strong>Total tiles = base tiles + ceil(base tiles × wastage% ÷ 100)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">02</span><div><h3>Placement tile quantity</h3><p>Count whole and cut positions from the layout. Optional reuse follows a deterministic best-fit schedule for measured, same-orientation rectangular offcuts; irregular, split, or rotated profiles are excluded.</p><strong>Base tiles = whole positions + new cut-stock tiles in the fit schedule</strong><strong>Total tiles = base tiles + ceil(base tiles × wastage% ÷ 100)</strong></div></article>
           <article className="formula-item"><span className="formula-index">03</span><div><h3>Canvas paint area</h3><p>Remove joined section edges from the outline perimeter, multiply by wall height, convert to square metres, then subtract counted and additional opening area.</p><strong>Net area = max(0, perimeter × wall height − opening area)</strong></div></article>
           <article className="formula-item"><span className="formula-index">04</span><div><h3>Manual paint area</h3><p>Enter area in square metres or square feet. Square feet are converted using 1 m² = 10.7639 ft².</p><strong>Net area = entered area in m²</strong></div></article>
           <article className="formula-item"><span className="formula-index">05</span><div><h3>Paint quantity and cost</h3><p>Quantities scale by coat count. Litres and gallons use the specified coverage rates independently.</p><strong>Litres = area × coats × 4 ÷ 25</strong><strong>Gallons = area × coats ÷ 25</strong><strong>Cost = quantity × price per selected unit</strong></div></article>
+          <article className="formula-item"><span className="formula-index">06</span><div><h3>Boxes by supplier coverage</h3><p>Use the supplier's stated covered area per box instead of the tile count when calculating purchases.</p><strong>Boxes = ceil(required tile area ÷ coverage per box)</strong></div></article>
         </div>
       </section>}
 
@@ -1052,9 +1288,25 @@ function App() {
         <p className="receipt-kicker">MATERIAL RECEIPT</p>
         <h1>{activeProject.name || 'Untitled project'}</h1>
         <p>Created {new Date().toLocaleDateString()}</p>
-        <table><thead><tr><th>Area</th><th>Section dimensions</th><th>Tile set</th><th>Base</th><th>Wastage</th><th>Total</th></tr></thead><tbody>{receiptItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.sections.map((section, index) => `Section ${index + 1}: ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}</td><td>{item.tileSet.name} · {displayLength(item.tileSet.width, unit)} × {displayLength(item.tileSet.height, unit)} {unit}</td><td>{typeof item.tiles === 'number' ? item.tiles.toFixed(item.area.tileCalculation.mode === 'simple' ? 2 : 0) : item.tiles}</td><td>{item.waste.toFixed(item.area.tileCalculation.mode === 'simple' ? 2 : 0)}</td><td>{item.total}</td></tr>)}</tbody></table>
+        <h2>Area quantities</h2>
+        <table><thead><tr><th>Area</th><th>Sections</th><th>Tile set / size</th><th>Layout</th><th>Base</th><th>Waste</th><th>Waste %</th><th>Total</th></tr></thead><tbody>{receiptItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.sections.map((section, index) => `Section ${index + 1}: ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}</td><td>{item.tileSet.name} · {displayLength(item.tileSet.width, unit)} × {displayLength(item.tileSet.height, unit)} {unit}</td><td>{getTileLayoutName(item.area.tileCalculation)}</td><td>{item.base.toFixed(item.area.tileCalculation.mode === 'simple' ? 2 : 0)}</td><td>{item.waste.toFixed(2)}</td><td>{item.wastePercent}%</td><td>{item.total} tiles</td></tr>)}</tbody></table>
+        {showPlanInReceipt && <>
+          <h2>Tile plans</h2>
+          {receiptItems.map((item) => <figure className="receipt-plan" key={item.area.id}>
+            <figcaption><strong>{item.area.name}</strong><span>{item.tileSet.name} · {displayLength(item.tileWidth, unit)} × {displayLength(item.tileHeight, unit)} {unit} · {getTileLayoutName(item.area.tileCalculation)}</span></figcaption>
+            <svg viewBox={`${item.bounds.minX - item.tileWidth * 0.2} ${item.bounds.minY - item.tileHeight * 0.2} ${item.bounds.width + item.tileWidth * 0.4} ${item.bounds.height + item.tileHeight * 0.4}`} role="img" aria-label={`${item.area.name} ${getTileLayoutName(item.area.tileCalculation)} tile plan`}>
+              <defs><pattern id={`receipt-grid-${item.area.id}`} width={item.pattern.width} height={item.pattern.height} patternUnits="userSpaceOnUse" patternTransform={item.pattern.transform}><path d={item.pattern.path} fill="none" stroke="#111" strokeWidth={Math.max(item.tileWidth, item.tileHeight) * 0.012} /></pattern></defs>
+              {item.area.sections.map((section) => <g key={section.id}><rect x={section.x} y={section.y} width={section.width} height={section.height} fill={`url(#receipt-grid-${item.area.id})`} stroke="#111" strokeWidth={Math.max(item.tileWidth, item.tileHeight) * 0.025} /></g>)}
+            </svg>
+            <p>Room: {item.area.sections.map((section, index) => `Section ${index + 1} ${displayLength(section.width, unit)} × ${displayLength(section.height, unit)} ${unit}`).join(' · ')}. Tile: {displayLength(item.tileWidth, unit)} × {displayLength(item.tileHeight, unit)} {unit}. Layout: {getTileLayoutName(item.area.tileCalculation)}.</p>
+          </figure>)}
+        </>}
+        <h2>Exact cut list</h2>
+        {receiptCutItems.length > 0
+          ? <table className="receipt-cut-table"><thead><tr><th>Area / tile set</th><th>Qty</th><th>Piece / profile</th><th>Cut and remainder</th><th>Pattern positions</th></tr></thead><tbody>{receiptCutItems.map((cut) => <tr key={`${cut.area.id}-${cut.index}`}><td>{cut.area.name} · {cut.tileSet.name}</td><td>{cut.quantity}</td><td>{cut.piece}</td><td>{cut.instruction}</td><td>{cut.positions.join(', ')}</td></tr>)}</tbody></table>
+          : <p>No partial tiles require cutting.</p>}
         <h2>Tile set totals</h2>
-        <table><thead><tr><th>Tile set</th><th>Quantity</th><th>Purchase</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? `${boxes} boxes` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
+        <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste</th><th>Waste %</th><th>Total needed</th><th>Boxes / contents</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)}</td><td>{wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes × ${tileSet.coveragePerBox} ${areaUnitLabels[tileSet.coverageUnit]}/box = ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]} covered` : `${boxes} boxes × ${tileSet.tilesPerBox} tiles/box = ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
         <h2>Paint by area</h2>
         <table><thead><tr><th>Area</th><th>Source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={item.area.id}><td>{item.area.name}</td><td>{item.area.paint.source === 'outline' ? 'Canvas outline' : 'Manual area'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity.toFixed(2)} {item.area.paint.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
