@@ -120,11 +120,11 @@ export default function WindowTreatments({ treatments, onChange, formatMoney }: 
               <div className="window-fields">
                 {dimensionInput('A · Window width', treatment.width, treatment.widthUnit ?? 'in', 'width')}
                 {dimensionInput('B · Window height', treatment.height, treatment.heightUnit ?? 'in', 'height')}
-                {measurement('Side allowance (each side)', treatment.sideAllowance, 'sideAllowance')}
+                {measurement('Side allowance (each side) · recommended 5–10 in', treatment.sideAllowance, 'sideAllowance')}
                 {measurement('C1 · Top extra drop', treatment.topExtra, 'topExtra')}
                 {measurement('C2 · Bottom extra drop', treatment.bottomExtra, 'bottomExtra')}
                 <label className="window-field"><span>Fabric width</span><select value={treatment.fabricWidth ?? ''} onChange={(event) => updateTreatment(treatment.id, (current) => ({ ...current, fabricWidth: event.target.value === '' ? null : Number(event.target.value) as 60 | 110 }))}><option value="">Select fabric width</option><option value={60}>60 in</option><option value={110}>110 in</option></select></label>
-                <label className="window-field"><span>X · Fullness</span><select value={treatment.fullness ?? ''} onChange={(event) => updateTreatment(treatment.id, (current) => ({ ...current, fullness: event.target.value === '' ? null : Number(event.target.value) as WindowTreatmentItem['fullness'] }))}><option value="">Select fullness</option><option value={1}>1× · Flat</option><option value={2}>2× · Minimal</option><option value={2.4}>2.4× · Regular</option><option value={3}>3× · Extra wide</option></select></label>
+                <label className="window-field"><span>X · Fullness</span><select value={treatment.fullness ?? ''} onChange={(event) => updateTreatment(treatment.id, (current) => ({ ...current, fullness: event.target.value === '' ? null : Number(event.target.value) as WindowTreatmentItem['fullness'] }))}><option value="">Select fullness</option><option value={1}>1× · Flat</option><option value={2}>2× · Minimal</option><option value={2.4}>2.4× · Regular</option><option value={2.6}>2.6× · Recommended</option><option value={3}>3× · Extra wide</option></select></label>
                 <label className="window-field"><span>Price per yard</span><span className="currency-input"><span>₱</span><WindowNumberInput label="Price per yard" value={treatment.pricePerYard} onValueChange={(next) => updateNumber('pricePerYard', next)} /></span></label>
               </div>
               <figure className="window-preview">

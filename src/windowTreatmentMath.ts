@@ -9,7 +9,7 @@ export type WindowTreatmentItem = {
   topExtra: number
   bottomExtra: number
   fabricWidth: 60 | 110 | null
-  fullness: 1 | 2 | 2.4 | 3 | null
+  fullness: 1 | 2 | 2.4 | 2.6 | 3 | null
   pricePerYard: number
 }
 
