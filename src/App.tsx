@@ -11,6 +11,8 @@ import viewIcon from '../SVG/View.svg'
 import hideIcon from '../SVG/View_hide.svg'
 import Calculator from './Calculator'
 import { evaluateArithmeticExpression } from './mathExpression'
+import WindowTreatments from './WindowTreatments'
+import { calculateWindowTreatment, type WindowTreatmentItem } from './windowTreatmentMath'
 import './App.css'
 
 type Unit = 'ft' | 'in' | 'cm' | 'mm'
@@ -35,7 +37,7 @@ type PaintProduct = { id: string; name: string; surface: 'wall' | 'ceiling'; sou
 type TileCalculation = { mode: TileMode; layout: TileLayout; bondOffsetMode: BondOffsetMode; bondDirection: BondDirection; customBondOffset: number; reuseCutTiles: boolean }
 type TileSet = { id: string; name: string; width: number; height: number; rotated: boolean; wasteOn: boolean; wastePercent: number; priceOpen: boolean; priceMode: 'tile' | 'box'; unitPrice: number; tilesPerBox: number; boxContentMode: 'tiles' | 'area'; coveragePerBox: number; coverageUnit: AreaUnit }
 type Area = { id: number; name: string; tileSetId: string; sections: Rect[]; paint: PaintSettings; paintProducts: PaintProduct[]; tileCalculation: TileCalculation }
-type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[] }
+type Project = { id: string; name: string; areas: Area[]; tileSets: TileSet[]; windowTreatments: WindowTreatmentItem[] }
 type ProjectBackup = { format: 'mmk-project-backup'; version: 1; projects: Project[] }
 
 const unitScale: Record<Unit, number> = { ft: 12, in: 1, cm: 1 / 2.54, mm: 1 / 25.4 }
@@ -68,7 +70,7 @@ function createTileCalculation(): TileCalculation {
 function createProject(name = 'Untitled project'): Project {
   const tileSet = createTileSet()
   const paint = createPaintSettings()
-  return { id: createId(), name, areas: [{ id: 1, name: 'Area 1', tileSetId: tileSet.id, sections: [{ id: 1, x: 0, y: 0, width: 400 / 2.54, height: 300 / 2.54 }], paint, paintProducts: [createPaintProduct('Paint 1', paint)], tileCalculation: createTileCalculation() }], tileSets: [tileSet] }
+  return { id: createId(), name, areas: [{ id: 1, name: 'Area 1', tileSetId: tileSet.id, sections: [{ id: 1, x: 0, y: 0, width: 400 / 2.54, height: 300 / 2.54 }], paint, paintProducts: [createPaintProduct('Paint 1', paint)], tileCalculation: createTileCalculation() }], tileSets: [tileSet], windowTreatments: [] }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,6 +96,16 @@ function isProjectBackup(value: unknown): value is ProjectBackup {
       (tileSet.coveragePerBox === undefined || (isFiniteNumber(tileSet.coveragePerBox) && tileSet.coveragePerBox > 0)) &&
       (tileSet.coverageUnit === undefined || tileSet.coverageUnit === 'm2' || tileSet.coverageUnit === 'ft2'))
     if (!validTileSets) return false
+    const validWindowTreatments = project.windowTreatments === undefined || (Array.isArray(project.windowTreatments) &&
+      project.windowTreatments.every((treatment) => isRecord(treatment) && typeof treatment.id === 'string' && typeof treatment.name === 'string' &&
+        isFiniteNumber(treatment.width) && treatment.width >= 0 && isFiniteNumber(treatment.height) && treatment.height >= 0 &&
+        (treatment.widthUnit === undefined || treatment.widthUnit === 'in' || treatment.widthUnit === 'ft' || treatment.widthUnit === 'cm' || treatment.widthUnit === 'mm') &&
+        (treatment.heightUnit === undefined || treatment.heightUnit === 'in' || treatment.heightUnit === 'ft' || treatment.heightUnit === 'cm' || treatment.heightUnit === 'mm') &&
+        isFiniteNumber(treatment.sideAllowance) && treatment.sideAllowance >= 0 && isFiniteNumber(treatment.topExtra) && treatment.topExtra >= 0 &&
+        isFiniteNumber(treatment.bottomExtra) && treatment.bottomExtra >= 0 && (treatment.fabricWidth === null || treatment.fabricWidth === 60 || treatment.fabricWidth === 110) &&
+        (treatment.fullness === null || treatment.fullness === 1 || treatment.fullness === 2 || treatment.fullness === 2.4 || treatment.fullness === 3) &&
+        isFiniteNumber(treatment.pricePerYard) && treatment.pricePerYard >= 0))
+    if (!validWindowTreatments) return false
     return project.areas.every((area) => {
       if (!isRecord(area) || !isFiniteNumber(area.id) || typeof area.name !== 'string' || typeof area.tileSetId !== 'string' || !tileSetIds.includes(area.tileSetId) || !Array.isArray(area.sections) || !area.sections.length) return false
       const validSections = area.sections.every((section) => isRecord(section) && isFiniteNumber(section.id) && isFiniteNumber(section.x) && isFiniteNumber(section.y) && isFiniteNumber(section.width) && section.width > 0 && isFiniteNumber(section.height) && section.height > 0)
@@ -162,6 +174,7 @@ function prepareImportedProject(project: Project): Project {
       paintProducts: normalizePaintProducts(area.paintProducts, area.paint).map((product) => ({ ...product, id: createId() })),
       tileCalculation: { ...createTileCalculation(), ...area.tileCalculation },
     })),
+    windowTreatments: (project.windowTreatments ?? []).map((treatment) => ({ ...treatment, widthUnit: treatment.widthUnit ?? 'in', heightUnit: treatment.heightUnit ?? 'in', id: createId() })),
   }
 }
 
@@ -204,6 +217,7 @@ function loadProjects(): Project[] {
     const parsed = stored ? JSON.parse(stored) as Project[] : []
     return parsed.length ? parsed.map((project) => ({
       ...project,
+      windowTreatments: (project.windowTreatments ?? []).map((treatment) => ({ ...treatment, widthUnit: treatment.widthUnit ?? 'in', heightUnit: treatment.heightUnit ?? 'in' })),
       tileSets: project.tileSets.map((tileSet) => ({ ...createTileSet(tileSet.name), ...tileSet })),
       areas: project.areas.map((area) => ({
         ...area,
@@ -811,7 +825,7 @@ function calculateBoxCount(tileCount: number, tileSet: TileSet) {
 
 function App() {
   const [unit, setUnit] = useState<Unit>(defaultUnit)
-  const [activeView, setActiveView] = useState<'tiles' | 'paint' | 'formulas'>('tiles')
+  const [activeView, setActiveView] = useState<'tiles' | 'paint' | 'windows' | 'formulas'>('tiles')
   const [showTileComputation, setShowTileComputation] = useState(true)
   const [showPaintComputation, setShowPaintComputation] = useState(true)
   const [projects, setProjects] = useState<Project[]>(loadProjects)
@@ -893,7 +907,9 @@ function App() {
   }).filter((item) => item.total > 0)
   const receiptTileTotal = receiptTileSets.reduce((sum, item) => sum + item.amount, 0)
   const receiptPaintTotal = receiptPaintItems.reduce((sum, item) => sum + item.cost, 0)
-  const receiptTotal = receiptTileTotal + receiptPaintTotal
+  const receiptWindowItems = activeProject.windowTreatments.map((treatment) => ({ treatment, ...calculateWindowTreatment(treatment) }))
+  const receiptWindowTotal = receiptWindowItems.reduce((sum, item) => sum + item.cost, 0)
+  const receiptTotal = receiptTileTotal + receiptPaintTotal + receiptWindowTotal
   const herringboneUnit = Math.min(tileW, tileH)
   const herringbonePlacements = [
     { x: 0, y: 0, width: 2, height: 1 },
@@ -923,6 +939,10 @@ function App() {
 
   function updateProject(update: (project: Project) => Project) {
     setProjects((current) => current.map((project) => project.id === activeProject.id ? update(project) : project))
+  }
+
+  function updateWindowTreatments(windowTreatments: WindowTreatmentItem[]) {
+    updateProject((project) => ({ ...project, windowTreatments }))
   }
 
   function updateArea(id: number, update: (area: Area) => Area) {
@@ -1250,7 +1270,7 @@ function App() {
       </section>
 
       <nav className="view-tabs" role="tablist" aria-label="Material views">
-        {(['tiles', 'paint', 'formulas'] as const).map((view) => <button key={view} type="button" role="tab" aria-selected={activeView === view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>{view === 'tiles' ? 'Tiles' : view === 'paint' ? 'Paint' : 'Formulas'}</button>)}
+        {(['tiles', 'paint', 'windows', 'formulas'] as const).map((view) => <button key={view} type="button" role="tab" aria-selected={activeView === view} className={activeView === view ? 'active' : ''} onClick={() => setActiveView(view)}>{view === 'tiles' ? 'Tiles' : view === 'paint' ? 'Paint' : view === 'windows' ? 'Window treatment' : 'Formulas'}</button>)}
       </nav>
 
       {activeView === 'tiles' && <div className="workspace">
@@ -1488,6 +1508,8 @@ function App() {
         </aside>
       </section>}
 
+      {activeView === 'windows' && <WindowTreatments treatments={activeProject.windowTreatments} onChange={updateWindowTreatments} formatMoney={formatMoney} />}
+
       {activeView === 'formulas' && <section className="calculations-workspace">
         <div className="calculations-heading"><div><p className="eyebrow">REFERENCE</p><h2>Formulas</h2></div></div>
         <div className="formula-list">
@@ -1497,6 +1519,7 @@ function App() {
           <article className="formula-item"><span className="formula-index">04</span><div><h3>Manual paint area</h3><p>Enter the painted area in m² or ft². ft² is converted to m².</p><strong>Net area = entered area in m²</strong></div></article>
           <article className="formula-item"><span className="formula-index">05</span><div><h3>Paint quantity and cost</h3><p>Each paint is estimated for its selected surface using its own coats, coverage, unit, and price. The estimate rounds up to whole litres or gallons so it doesn't estimate less paint than you need.</p><strong>Raw quantity = selected surface area × coats ÷ coverage per selected unit</strong><strong>Whole units to buy = ceil(raw quantity)</strong><strong>Cost = whole units to buy × price per selected unit</strong></div></article>
           <article className="formula-item"><span className="formula-index">06</span><div><h3>Boxes by supplier coverage</h3><p>Enter the coverage listed on the box.</p><strong>Boxes = ceil(required tile area ÷ coverage per box)</strong></div></article>
+          <article className="formula-item"><span className="formula-index">07</span><div><h3>Window-treatment fabric and cost</h3><p>Calculate each window independently. A is window width; B is window height; the side allowance is added on both sides; C1 and C2 are the extra top and bottom drops; and 12 inches are added for the standard hem allowance. X is the selected fullness multiplier.</p><strong>D = A + 2 × side allowance</strong><strong>E = B + C1 + C2 + 12 in</strong><strong>For 60-inch fabric, or 110-inch fabric when E &gt; 110 in: yards = D × X × E ÷ (fabric width × 36)</strong><strong>For 110-inch fabric when E ≤ 110 in: yards = D × X ÷ 36</strong><strong>Window cost = yards × price per yard (₱)</strong></div></article>
         </div>
       </section>}
 
@@ -1523,6 +1546,8 @@ function App() {
         <table><thead><tr><th>Tile set</th><th>Base</th><th>Waste (qty / %)</th><th>Total</th><th>Purchase</th><th>Estimate</th></tr></thead><tbody>{receiptTileSets.map(({ tileSet, base, waste, wastePercent, total, boxes, amount }) => <tr key={tileSet.id}><td>{tileSet.name}</td><td>{Number(base.toFixed(2)).toLocaleString()}</td><td>{waste.toFixed(2)} / {wastePercent}%</td><td>{total} tiles</td><td>{tileSet.priceMode === 'box' ? tileSet.boxContentMode === 'area' ? `${boxes} boxes / ${(boxes * tileSet.coveragePerBox).toFixed(2)} ${areaUnitLabels[tileSet.coverageUnit]}` : `${boxes} boxes / ${boxes * tileSet.tilesPerBox} tiles` : 'Per tile'}</td><td>{formatMoney(amount)}</td></tr>)}</tbody></table>
         <h2>Paint by area</h2>
         <table><thead><tr><th>Area</th><th>Paint name</th><th>Surface</th><th>Area source</th><th>Painted area</th><th>Coats</th><th>Quantity</th><th>Estimate</th></tr></thead><tbody>{receiptPaintItems.map((item) => <tr key={`${item.area.id}-${item.product.id}`}><td>{item.area.name}</td><td>{item.product.name}</td><td>{item.product.surface === 'wall' ? 'Wall' : 'Ceiling'}</td><td>{item.product.source === 'manual' ? 'Manual' : 'Canvas'}</td><td>{item.netArea.toFixed(2)} m²</td><td>{item.coats}</td><td>{item.quantity} {item.product.volume === 'litres' ? 'L' : 'gallons'}</td><td>{formatMoney(item.cost)}</td></tr>)}</tbody></table>
+        <h2>Window treatments</h2>
+        <table><thead><tr><th>Window</th><th>Fabric width</th><th>Horizontal D</th><th>Drop E</th><th>Fullness</th><th>Yards</th><th>Price / yard</th><th>Cost</th><th>Computation</th></tr></thead><tbody>{receiptWindowItems.map(({ treatment, horizontalCoverage, fabricDrop, usesAreaFormula, calculationReady, yards, cost }) => <tr key={treatment.id}><td>{treatment.name}</td><td>{treatment.fabricWidth === null ? '—' : `${treatment.fabricWidth} in`}</td><td>{horizontalCoverage.toFixed(2)} in</td><td>{fabricDrop.toFixed(2)} in</td><td>{treatment.fullness === null ? '—' : `${treatment.fullness}×`}</td><td>{calculationReady ? `${yards.toFixed(2)} yd` : '—'}</td><td>{formatMoney(treatment.pricePerYard)}</td><td>{formatMoney(cost)}</td><td>{!calculationReady ? 'Enter window dimensions and select fabric width and fullness.' : usesAreaFormula ? `${horizontalCoverage.toFixed(2)} × ${treatment.fullness} × ${fabricDrop.toFixed(2)} ÷ (${treatment.fabricWidth} × 36) × ${formatMoney(treatment.pricePerYard)}` : `${horizontalCoverage.toFixed(2)} × ${treatment.fullness} ÷ 36 × ${formatMoney(treatment.pricePerYard)}`}</td></tr>)}</tbody></table>
         <p className="receipt-total">Estimated total <strong>{formatMoney(receiptTotal)}</strong></p>
       </section>
       {calculatorOpen

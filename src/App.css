@@ -301,6 +301,40 @@
 .calculator-key:hover { border-color: #777366; background: #373832; }
 .calculator-key:active { background: #45463f; }
 .calculator-key.utility-key { color: #b7b6aa; background: #282a27; font-size: 12px; }
+.window-workspace { padding: 30px 0 64px; }
+.window-page-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.window-page-heading h2 { margin: 0; color: var(--paper); font-size: 20px; font-weight: 550; }
+.window-page-heading .eyebrow { margin-bottom: 6px; }
+.window-intro, .window-empty { margin: 15px 0 20px; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.window-empty { padding: 22px; border: 1px dashed #454139; color: var(--quiet); text-align: center; }
+.window-treatment-list { display: grid; gap: 16px; }
+.window-treatment-card { min-width: 0; padding: 16px; border: 1px solid #41423b; background: #20211e; }
+.window-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }
+.window-name-input { flex: 1; min-width: 0; height: 34px; padding: 0 9px; border: 1px solid #41423b; outline: 0; color: var(--paper); background: #1c1d1a; font-size: 12px; }
+.window-name-input:focus { border-color: var(--tan); }
+.window-fields { display: grid; grid-template-columns: repeat(4, minmax(135px, 1fr)); gap: 12px; }
+.window-field { display: grid; min-width: 0; gap: 5px; color: var(--quiet); font-size: 10px; }
+.window-field select { width: 100%; height: 34px; padding: 0 8px; border: 1px solid #41423b; color: var(--paper); background: #1c1d1a; font-size: 11px; }
+.window-dimension-input select { width: auto; height: 100%; padding: 0 7px; border: 0; border-left: 1px solid #41423b; color: var(--tan); background: transparent; font-family: var(--mono); font-size: 10px; }
+.window-field .currency-input > input { padding-right: 7px; }
+.window-preview { margin: 17px 0 0; padding: 11px 12px 9px; border: 1px solid #383932; background: #1b1c19; }
+.window-preview figcaption { display: flex; justify-content: space-between; gap: 12px; color: var(--quiet); font-family: var(--mono); font-size: 9px; letter-spacing: 0.04em; }
+.window-preview figcaption span:first-child { color: var(--tan); }
+.window-preview figcaption label { display: flex; align-items: center; gap: 6px; }
+.window-preview figcaption select { max-width: 120px; height: 25px; padding: 0 5px; border: 1px solid #41423b; color: var(--paper); background: #1c1d1a; font: inherit; letter-spacing: normal; }
+.window-preview svg { display: block; width: 100%; height: clamp(220px, 34vw, 330px); margin-top: 8px; background-color: #20211e; background-image: radial-gradient(#393a34 0.75px, transparent 0.75px); background-size: 14px 14px; }
+.window-preview p { margin: 8px 0 0; color: var(--quiet); font-size: 9px; line-height: 1.5; }
+.window-preview-empty { display: grid; min-height: 220px; place-items: center; border: 1px dashed #383932; text-align: center; }
+.window-computation { display: grid; gap: 7px; margin-top: 17px; padding: 13px; border: 1px solid #383932; background: #1b1c19; }
+.window-computation h3 { margin: 0 0 3px; color: var(--tan); font-size: 11px; font-weight: 550; }
+.window-computation p { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+.window-cost-result, .window-total { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 13px; padding-top: 12px; border-top: 1px solid #383932; color: var(--quiet); font-size: 10px; }
+.window-cost-result strong, .window-total strong { color: var(--tan); font-family: var(--display); font-size: 24px; font-weight: 400; }
+.window-total { margin-top: 20px; padding: 15px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--paper); font-size: 12px; }
+.window-total strong { font-size: 28px; }
+@media (max-width: 900px) { .window-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 680px) { .window-workspace { padding-top: 22px; } .window-page-heading { align-items: flex-start; flex-direction: column; } .window-treatment-card { padding: 12px; } .window-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .window-computation { padding: 10px; } .window-computation p { font-size: 9px; } .window-preview { padding: 9px; } .window-preview svg { height: 240px; } }
+@media (max-width: 390px) { .window-fields { grid-template-columns: 1fr; } .window-total strong { font-size: 24px; } }
 .calculator-key.operator-key { border-color: #786047; color: #f0c49d; background: #342d26; font-size: 18px; }
 .calculator-key.equals-key { border-color: #738a79; color: #eff1e9; background: #536c5a; font-size: 18px; }
 .calculator-key.zero-key { grid-column: span 2; }
